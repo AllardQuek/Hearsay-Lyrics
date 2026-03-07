@@ -4,12 +4,16 @@ import { getLineLevelPinyin } from "@/lib/pinyin";
 
 export async function POST(req: Request) {
   try {
-    const { text, funnyWeight = 0.5 } = await req.json();
+    const { text, funnyWeight = 0.5, audioUrl } = await req.json();
 
     if (!text) {
       return NextResponse.json({ error: "No text provided" }, { status: 400 });
     }
 
+    // In a real implementation with Gemini File API, we would download the audioUrl 
+    // and upload it to Gemini here. For now, we'll signal the intent to the prompt.
+    const isUltraMode = !!audioUrl;
+    
     const lines = getLineLevelPinyin(text);
     
     // Process lines in chunks to stay within model limits and maintain speed
@@ -17,10 +21,13 @@ export async function POST(req: Request) {
     const linesToProcess = lines.slice(0, 10);
     
     // Construct a single prompt for multiple lines to save tokens/time
+    // NOTE: We now ALWAYS include the Aural Context instruction to force the best generation quality.
+    // The presence of a real audioUrl is a WIP feature to be implemented with Gemini File API.
     const prompt = `
 ${HEARSAY_PROMPT}
 
 Target Humor Weight: ${funnyWeight} (0-1)
+AUDIO CONTEXT ENABLED: Prioritize the singer's cadence and slurring as described in the Aural Context guidelines.
 
 Process these lines:
 ${JSON.stringify(linesToProcess)}

@@ -14,17 +14,26 @@ You can start editing the page by modifying `app/page.tsx`. The page auto-update
 
 This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
 
-## Learn More
+## 🎙️ Audio Context (Ultra Mode) — WIP Roadmap
 
-To learn more about Next.js, take a look at the following resources:
+Currently, the "Add Audio Link" feature uses **Aural-First Prompt Engineering** to encourage Gemini to generate lyrics that match general singing cadences and common slurs in C-Pop.
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+### Current Implementation (M1)
+- **Prompt Injection**: The system always includes an `AUDIO CONTEXT` instruction to the Gemini 3.1 Flash-Lite model.
+- **Goal**: Forces the model to prioritize singability and phonetics over literal translation.
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+### Future Multimodal Integration (M2/M3)
+To achieve true audio-informed generation, the following steps are planned:
 
-## Deploy on Vercel
+1.  **Audio Extraction**: Integrate `yt-dlp` or a similar library to extract audio streams from YouTube URLs.
+2.  **File Hosting**: Temporary storage (e.g., Google Cloud Storage or local `/tmp`) to hold the audio buffer.
+3.  **Gemini Multimodal API**: Use the **Google AI File Manager API** to upload audio files.
+4.  **Audio-to-Hearsay Pipeline**:
+    *   Send the `fileUri` along with the lyrics to **Gemini 1.5 Pro**.
+    *   Instruct the model to timestamp pauses, match vowel elongations, and identify specific singer slurs that differ from standard Pinyin.
+5.  **Synchronization**: Automated LRC (Lyric) timestamping using Gemini's ability to "hear" when words begin and end.
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+### Potential APIs
+- **Google Generative AI SDK**: For `model.generateContent([filePart, textPart])`.
+- **YouTube Data API**: To fetch metadata (title, artist) automatically.
+- **Punctuation & Rhythm Extraction**: Specialized audio analysis libraries (like `librosa` or `Essentia`) could assist in identifying beats per minute (BPM) to further refine syllable matching.

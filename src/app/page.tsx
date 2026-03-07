@@ -4,7 +4,7 @@ import { useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { Sparkles, Music, Share2, Github, Layout } from "lucide-react";
 import SongInput from "@/components/SongInput";
-import LyricCard from "@/components/LyricCard";
+import LyricSheet from "@/components/LyricSheet";
 import { HearsayLine } from "@/lib/gemini";
 import { formatHearsayForClipboard } from "@/lib/utils";
 
@@ -12,8 +12,9 @@ export default function Home() {
   const [loading, setLoading] = useState(false);
   const [results, setResults] = useState<HearsayLine[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const [funnyWeight, setFunnyWeight] = useState(0.5);
 
-  const handleGenerate = async (text: string) => {
+  const handleGenerate = async (text: string, audioUrl?: string) => {
     setLoading(true);
     setError(null);
     setResults([]);
@@ -22,11 +23,12 @@ export default function Home() {
       const response = await fetch("/api/generate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ text }),
+        body: JSON.stringify({ text, funnyWeight, audioUrl }),
       });
 
       if (!response.ok) {
-        throw new Error("Generation failed. Make sure GEMINI_API_KEY is set.");
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.error || `Generation failed (Status ${response.status})`);
       }
 
       const data = await response.json();
@@ -39,11 +41,24 @@ export default function Home() {
     }
   };
 
-  const handleShare = () => {
+  const handleShare = async () => {
     if (results.length === 0) return;
     const text = formatHearsayForClipboard(results);
-    navigator.clipboard.writeText(text);
-    alert("Copied all lyrics to clipboard!");
+    
+    if (navigator.share) {
+      try {
+        await navigator.share({
+          title: "My Hearsay Lyrics",
+          text: text,
+          url: window.location.href,
+        });
+      } catch (err) {
+        console.error("Error sharing:", err);
+      }
+    } else {
+      await navigator.clipboard.writeText(text);
+      alert("Full lyrics copied to clipboard!");
+    }
   };
 
   return (
@@ -84,6 +99,37 @@ export default function Home() {
 
       {/* Main Action Area */}
       <div className="w-full max-w-5xl mx-auto relative z-10 space-y-12">
+        {/* Vibe Slider */}
+        <motion.div
+          initial={{ opacity: 0, y: 10 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.25 }}
+          className="max-w-md mx-auto space-y-4"
+        >
+          <div className="flex justify-between items-end px-2">
+            <span className="text-sm font-display font-bold text-muted flex items-center gap-1.5">
+              <span className="w-2 h-2 rounded-full bg-blue-500" /> Faithful
+            </span>
+            <div className="text-center">
+              <span className="text-xs uppercase tracking-widest text-muted/50 font-bold">Vibe Control</span>
+            </div>
+            <span className="text-sm font-display font-bold text-accent flex items-center gap-1.5">
+              Hilarious <span className="w-2 h-2 rounded-full bg-accent animate-pulse" />
+            </span>
+          </div>
+          <div className="relative group">
+            <input
+              type="range"
+              min="0"
+              max="1"
+              step="0.1"
+              value={funnyWeight}
+              onChange={(e) => setFunnyWeight(parseFloat(e.target.value))}
+              className="w-full"
+            />
+          </div>
+        </motion.div>
+
         <motion.div
           initial={{ opacity: 0, scale: 0.95 }}
           animate={{ opacity: 1, scale: 1 }}
@@ -127,23 +173,20 @@ export default function Home() {
             animate={{ opacity: 1 }}
             className="space-y-8"
           >
-            <div className="flex items-center justify-between">
-              <h2 className="text-3xl font-display font-bold flex items-center gap-3">
-                <Music className="text-primary" /> Your Hearsay Lyrics
+            <div className="flex flex-col md:flex-row items-center justify-between gap-6">
+              <h2 className="text-3xl md:text-4xl font-display font-bold flex items-center gap-3">
+                <Music className="text-primary" /> The Hearsay Sheet
               </h2>
               <button
                 onClick={handleShare}
-                className="flex items-center gap-2 px-6 py-3 rounded-full bg-white text-black font-display font-bold hover:bg-white/90 transition-standard shadow-premium"
+                className="flex items-center gap-2 px-8 py-4 rounded-full bg-white text-black font-display font-bold hover:bg-primary hover:text-white transition-all shadow-premium group"
               >
-                <Share2 size={18} /> Share Lyrics
+                <Share2 size={18} className="group-hover:scale-110 transition-transform" /> 
+                Share Complete Lyrics
               </button>
             </div>
             
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-              {results.map((line, idx) => (
-                <LyricCard key={idx} line={line} index={idx} />
-              ))}
-            </div>
+            <LyricSheet lines={results} />
           </motion.div>
         )}
       </div>

@@ -9,6 +9,8 @@ Refer to hackathon details here: https://cerebralvalley.ai/e/gemini-3-singapore-
 **Product name**  
 **Hearsay Lyrics**
 
+Inpsiration: https://vt.tiktok.com/ZSuLuPCC8/
+
 **Tagline**  
 "Sing your favourite Mandarin songs using English lyrics that sound just like Chinese."
 
