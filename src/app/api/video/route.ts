@@ -46,13 +46,12 @@ export async function POST(req: Request) {
 
     // Step 2: Kick off Veo 3.1 video generation (async – returns operation immediately)
     const operation = await genaiClient.models.generateVideos({
-      model: "veo-3.0-generate-preview",
+      model: "veo-3.1-generate-preview",
       prompt: scenePrompt,
       config: {
         numberOfVideos: 1,
         durationSeconds: 8,
         aspectRatio: "16:9",
-        enhancePrompt: true,
       },
     });
 
