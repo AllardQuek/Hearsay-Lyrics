@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
-import { modelLite, HEARSAY_PROMPT, HearsayLine } from "@/lib/gemini";
+import { modelLite, HEARSAY_PROMPT, HearsayLine, safeGenerateContent } from "@/lib/gemini";
 import { getLineLevelPinyin } from "@/lib/pinyin";
+import { PHONETIC_ANCHORS, BANNED_PATTERNS } from "@/lib/phonetic-anchors";
 
 export async function POST(req: Request) {
   try {
@@ -14,40 +15,84 @@ export async function POST(req: Request) {
     // and upload it to Gemini here. For now, we'll signal the intent to the prompt.
     const isUltraMode = !!audioUrl;
     
-    const lines = getLineLevelPinyin(text);
-    
-    // Process lines in chunks to stay within model limits and maintain speed
-    // For a hackathon, we'll process up to 10 lines for the demo
-    const linesToProcess = lines.slice(0, 10);
-    
-    // Construct a single prompt for multiple lines to save tokens/time
-    // NOTE: We now ALWAYS include the Aural Context instruction to force the best generation quality.
-    // The presence of a real audioUrl is a WIP feature to be implemented with Gemini File API.
-    const prompt = `
+    const allLines = getLineLevelPinyin(text);
+    const chunkSize = 10;
+    const lineChunks: (typeof allLines)[] = [];
+    for (let i = 0; i < allLines.length; i += chunkSize) {
+      lineChunks.push(allLines.slice(i, i + chunkSize));
+    }
+
+    const encoder = new TextEncoder();
+    const stream = new ReadableStream({
+      async start(controller) {
+        try {
+          // Process all chunks in parallel for maximum speed
+          const chunkPromises = lineChunks.map(async (chunk, index) => {
+            // Step 1: Creative Generation
+            const generationPrompt = `
 ${HEARSAY_PROMPT}
 
 Target Humor Weight: ${funnyWeight} (0-1)
-AUDIO CONTEXT ENABLED: Prioritize the singer's cadence and slurring as described in the Aural Context guidelines.
-
-Process these lines:
-${JSON.stringify(linesToProcess)}
+Process these specific lines:
+${JSON.stringify(chunk)}
 
 Return valid JSON array of HearsayLine objects.
 `;
+            const genResult = await safeGenerateContent(modelLite, generationPrompt);
+            const initialHearsay = genResult.response.text();
 
-    const result = await modelLite.generateContent(prompt);
-    const response = await result.response;
-    const responseText = response.text();
-    
-    // Extract JSON from response (handling potential markdown fences)
-    const jsonMatch = responseText.match(/\[[\s\S]*\]/);
-    if (!jsonMatch) {
-      throw new Error("Failed to find JSON array in Gemini response");
-    }
-    
-    const hearsayLines = JSON.parse(jsonMatch[0]);
+            // Step 2: Strict Dictionary Review (The "Editor" Step)
+            const reviewPrompt = `
+You are a Strict English Dictionary Editor. 
+Review the following "Hearsay Lyrics" JSON. 
 
-    return NextResponse.json({ lines: hearsayLines });
+CRITICAL MISSION: 
+Replace any "text" that contains non-English words, pseudo-English sounds, or pinyin.
+
+PHONETIC ANCHOR GUIDE (USE AS SUGGESTIONS):
+When you encounter these pinyin-style sounds, use these REAL English words as your primary inspiration:
+${Object.entries(PHONETIC_ANCHORS).map(([pinyin, english]) => `- [${pinyin}] -> ${english.join(", ")}`).join("\n")}
+
+BANNED PINYIN/PHONETIC SNIPPETS:
+${BANNED_PATTERNS.join(", ")}
+
+STRICT RULES:
+1. NO PINYIN/SNIPPETS: "shuo" is NOT English. "Sure" IS English.
+2. CREATIVE LIBERTY: You are NOT restricted to the anchors above, but any word you choose MUST be a real dictionary word or common slang.
+3. RELIABILITY: Aim for 100% dictionary compliance in the final JSON.
+
+INPUT JSON:
+${initialHearsay}
+
+Return the FIXED JSON array only.
+`;
+            const reviewResult = await safeGenerateContent(modelLite, reviewPrompt);
+            const responseText = reviewResult.response.text();
+            
+            const jsonMatch = responseText.match(/\[[\s\S]*\]/);
+            if (!jsonMatch) {
+              throw new Error(`Failed to find JSON for chunk ${index}`);
+            }
+            return JSON.parse(jsonMatch[0]);
+          });
+
+          // Wait for each promise in ORDER to stream it
+          for (const promise of chunkPromises) {
+            const hearsayLines = await promise;
+            controller.enqueue(encoder.encode(JSON.stringify(hearsayLines) + "\n"));
+          }
+        } catch (error) {
+          console.error("Stream Error:", error);
+          controller.error(error);
+        } finally {
+          controller.close();
+        }
+      },
+    });
+
+    return new Response(stream, {
+      headers: { "Content-Type": "application/x-ndjson" },
+    });
   } catch (error) {
     console.error("Hearsay Generation Error:", error);
     const message = error instanceof Error ? error.message : "Failed to generate hearsay";

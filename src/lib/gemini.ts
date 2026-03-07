@@ -4,21 +4,38 @@ const apiKey = process.env.GEMINI_API_KEY || "";
 const genAI = new GoogleGenerativeAI(apiKey);
 
 // Using Flash-Lite for speed in hearsay generation
-// Using Pro for multimodal or complex reasoning if needed
-// Flash-Lite for speed in hearsay generation (Primary Milestone 1)
 export const modelLite = genAI.getGenerativeModel({ 
-  model: "models/gemini-3.1-flash-lite-preview", 
+  model: "models/gemini-3.1-flash-lite", 
 });
 
 // Pro for multimodal or complex reasoning (Milestone 2/3)
 export const modelPro = genAI.getGenerativeModel({ 
-  model: "models/gemini-3.1-pro-preview", 
+  model: "models/gemini-3.1-pro", 
 });
 
-// TTS specific model for the pronunciation guide
-export const modelTTS = genAI.getGenerativeModel({
-  model: "models/gemini-2.5-pro-preview-tts",
-});
+/**
+ * Utility to call Gemini with retries for rate limits (429)
+ */
+export async function safeGenerateContent(model: any, prompt: string | any[], maxRetries = 3) {
+  let lastError;
+  for (let i = 0; i < maxRetries; i++) {
+    try {
+      const result = await model.generateContent(prompt);
+      return result;
+    } catch (error: any) {
+      lastError = error;
+      // If it's a 429 (Too Many Requests), wait and retry
+      if (error.status === 429 || error.message?.includes("429")) {
+        const waitTime = Math.pow(2, i) * 1000 + Math.random() * 1000;
+        console.warn(`Rate limited. Retrying in ${Math.round(waitTime)}ms... (Attempt ${i + 1}/${maxRetries})`);
+        await new Promise(resolve => setTimeout(resolve, waitTime));
+        continue;
+      }
+      throw error;
+    }
+  }
+  throw lastError;
+}
 
 export interface HearsayCandidate {
   text: string;
@@ -31,37 +48,44 @@ export interface HearsayLine {
   pinyin: string;
   meaning: string;
   candidates: HearsayCandidate[];
+  startTime?: number;
 }
 
 export const HEARSAY_PROMPT = `
 You are a creative "Hearsay Lyrics" generator for C-Pop. 
 Your task is to take lyric lines and generate singable English "hearsay" lyrics that use REAL English words, slang, and Gen-Z vocabulary.
 
-AURAL CONTEXT (IF AUDIO PROVIDED):
-If audio is provided with this request, prioritize how the singer explicitly pronounces, slurs, or speeds through the words. 
-- Match the cadence and delivery of the singer.
-- If they slur two words together, try to match it with one smooth English phrase (e.g., "liu xia" -> "loser").
-- Match the energy (e.g., if a line is shouted vs whispered).
+AURAL-FIRST PRIORITY:
+Always prioritize how a singer explicitly pronounces, slurs, or speeds through the words. 
+- Match the natural cadence and rhythm of a musical delivery.
+- If words slur together in singing, match it with one smooth English phrase (e.g., "liu xia" -> "loser").
 
-PHONETIC MAPPING GUIDE:
-Avoid "Literal Pinyin Bias". Pinyin letters often sound different from their English consonant counterparts:
-- Pinyin "j" (e.g., "ji", "ju"): Sounds like "gee" or "j" in "jump". Use words like "Gee", "Jewel", "G", "Jay". AVOID hard "G" sounds like "get".
-- Pinyin "q" (e.g., "qi", "qu"): Sounds like "ch" in "cheese". Use "Cheat", "Choose", "She". AVOID "Q" sounds.
-- Pinyin "x" (e.g., "xi", "xu"): Sounds like "sh" in "she". Use "She", "See", "Sheet".
-- Pinyin "c" (e.g., "ci"): Sounds like "ts" in "cats". Use "Its", "That's".
-- Pinyin "zh", "ch", "sh": Ensure these map to their English equivalents "j/zh", "ch", and "sh".
+PHONETIC MAPPING GUIDE (SAFE ENGLISH SUBSTITUTES):
+Never use pinyin sounds. Use these real English words instead:
+- [shuo/shuo] -> Sure, Shore, Show, Sure
+- [tiao/tiao] -> Tell, Tail, Tale, Teal, Toe
+- [nan/nan] -> None, Nun, Nan
+- [ji/ji] -> Gee, G, Jay, Key, G
+- [qi/qi] -> Cheat, She, Check, Cheese
+- [xi/xi] -> She, Sea, See, Sheet
+- [zui/zui] -> Sway, Way, Sway
+- [zao/zao] -> So, Saw, Sew
+- [quan/quan] -> Can, Coin, Kwan
+- [man/man] -> Man, Mum, Moon
+- [tian/tian] -> Ten, Tin, Teen
 
-CRITICAL REQUIREMENTS:
-1. REAL WORDS ONLY: Every word MUST be a real English word or valid slang. NO phonetic "nonsense" words.
-2. STRICT SYLLABLE MATCH: The hearsay MUST have the EXACT same number of syllables as the Mandarin line.
-3. SEMANTIC FLOW: The lyrics should form semi-coherent, funny English sentences.
-4. HUMOR WEIGHT: Use the provided "Target Humor Weight" (0-1). 0 is more faithful sounds, 1 is more hilarious/absurd meanings using slang.
+CRITICAL RULES:
+1. REAL WORDS ONLY (STRICT): If a word is not in an English dictionary or isn't popular slang (e.g., lit, rizz, flex), it is BANNED. ❌ BANNED: 'shuo', 'tiao', 'nan', 'jee', 'sha', 'piao'.
+2. BANNED SUBSTRINGS: Never output strings ending in pinyin vowels like 'uo', 'iao', 'ia' unless they are English words.
+3. NO PSEUDO-ENGLISH: "Shawn" is a name. "Shong" is a sound (BANNED). Use "Song".
+4. STRICT SYLLABLE MATCH: Count syllables carefully. "Man" (1) matches "Man" (1). "Sure" (1) matches "Shuo" (1).
 
-Input Example & Style Inspiration:
-Mandarin: "慢慢忘记你" (màn màn wàng jì nǐ - 5 syllables)
-Hearsay: "Man man want gee knee" or "Mum mum want G knee" (AVOID "get knee" - "jì" rhymes with "gee").
+GOOD EXAMPLE:
+Mandarin: "流下唇印的嘴" (Liú xià chún yìn de zuǐ - 6 syllables)
+❌ Bad: "Lose ya shorn in the zway" ("zway" is not a word)
+✅ Good: "Lose ya shorn in the sway" or "Lose ya shorn in the way"
 
-Output Structure (JSON Array):
+Output Structure (JSON Array ONLY):
 [
   {
     "chinese": "Standardized Mandarin Characters",
@@ -77,7 +101,45 @@ Output Structure (JSON Array):
 Return ONLY a valid JSON array.
 `;
 
+export const REFINE_PROMPT = `
+You are a creative "Hearsay Lyrics" refiner for C-Pop.
+Your task is to take a specific Mandarin lyric line, its pinyin, the current English hearsay version, and a USER COMMENT on how to improve it.
 
+CRITICAL RULES:
+1. MUST REMAIN "HEARSAY": The output must still sound like the original Mandarin pinyin.
+2. INCORPORATE USER VIBE: If the user says "make it funnier", "make it more street", or "use the word 'money'", try to satisfy that while keeping the phonetic match.
+3. REAL WORDS ONLY: All rules from the original Hearsay prompt apply (No 'shuo', 'tiao', etc).
 
+Input Context:
+Mandarin: {chinese}
+Pinyin: {pinyin}
+Current Hearsay: {currentText}
+User Feedback: {comment}
 
+Output Structure (JSON Array ONLY with 3 better candidates):
+[
+  {"text": "Refined variant 1", "phonetic": 0.9, "humor": 0.9},
+  {"text": "Refined variant 2", "phonetic": 0.85, "humor": 0.95},
+  {"text": "Refined variant 3", "phonetic": 0.8, "humor": 1.0}
+]
 
+Return ONLY a valid JSON array.
+`;
+
+export const AUTO_SYNC_PROMPT = `
+You are a master "Karaoke Sync" engineer.
+Your task is to take a Mandarin song lyrics (with pinyin) and an audio file, and return the precise START TIME for each line in the song.
+
+INSTRUCTIONS:
+1. Align each lyric line to the audio.
+2. Return a JSON array of objects, one for each line.
+3. Each object must have "chinese" (original lyrics) and "startTime" (the second the line starts, e.g., 34.5).
+
+Output Structure:
+[
+  {"chinese": "对这个世界如果你有太多的抱怨", "startTime": 32.5},
+  ...
+]
+
+Return ONLY valid JSON.
+`;
