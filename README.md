@@ -1,18 +1,39 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Hearsay Lyrics
+
+**An AI-powered KTV companion that generates singable, phonetic English "misheard" lyrics for any Mandarin song.**
+
+Hearsay Lyrics syncs English phonetic approximations to the original audio and generates immersive background visuals — enabling non-Chinese speakers to seamlessly join karaoke sessions and bridging cultural gaps through music and laughter.
+
+---
+
+## Features
+
+- **Instant Phonetic Generation** — Paste in Mandarin lyrics and instantly get singable English approximations that match the sound and rhythm of the original, not just the meaning.
+- **Faithful ↔ Hilarious Slider** — Drag a slider live to shift the AI's output anywhere from strict phonetic accuracy to full comedic "misheard" chaos.
+- **AI Refine** — Pick any line, enter a prompt (e.g. "make this sound cooler"), and the AI rewrites it instantly.
+- **Alternative Cycles** — Hit the ↺ button to cycle through alternative AI-generated options for any line.
+- **Manual Editing** — Every line is directly editable in the UI. If you come up with something uniquely funny or poetic, just type it in. Nothing is locked in.
+- **Experimental AI Audio Sync** — Skip the LRC file entirely. Upload a raw MP3 and Gemini listens to the audio and figures out timestamps on its own, so the English highlights track the original Chinese vocals in real-time.
+- **AI Image Slideshow** — As soon as lyrics are generated, a background image slideshow is automatically created to match the emotional vibe of the song.
+- **AI Video Backdrop** — Go further and generate a cohesive AI video backdrop that reacts to the emotional arc of the lyrics, turning any opaque Chinese track into a full immersive KTV experience anyone can join.
+
+---
+
+## Why Hearsay Lyrics?
+
+While there are thousands of literal translation apps and language learning tools, Hearsay Lyrics tackles a completely novel problem: **cross-language phonetic approximation**. We aren't translating *meaning* (which you can't sing) — we're translating *sound and rhythm* into English, which has never been packaged as a deliberate, interactive sing-along bridge.
+
+Beyond KTV, the core technology has applications for international fans of M-Pop, K-Pop, and J-Pop, and offers a fun, low-friction entry point for language learners to engage with foreign media without needing to read native scripts first.
+
+---
 
 ## Getting Started
-
-First, run the development server:
 
 ```bash
 pnpm dev
 ```
 
 Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
-
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
-
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
 
 ## 🎙️ Audio Context (Ultra Mode) — WIP Roadmap
 
