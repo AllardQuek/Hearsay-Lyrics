@@ -1,7 +1,7 @@
 "use client";
 
 import { motion, AnimatePresence } from "framer-motion";
-import { RefreshCw, Copy, Check, Sparkles, Pencil, Save, X, Send, Loader2, Clapperboard } from "lucide-react";
+import { RefreshCw, Copy, Check, Sparkles, Pencil, Save, X, Send, Loader2, Clapperboard, Video } from "lucide-react";
 import { useState, useEffect, useRef } from "react";
 import { cn } from "@/lib/utils";
 import { HearsayLine } from "@/lib/gemini";
@@ -315,7 +315,7 @@ function LyricLineItem({ line: initialLine, index, isActive, onClick }: LyricLin
   );
 }
 
-export default function LyricSheet({ lines, currentTime = 0, onLineClick, onShowVisuals }: { lines: HearsayLine[], currentTime?: number, onLineClick?: (time: number) => void, onShowVisuals?: () => void }) {
+export default function LyricSheet({ lines, currentTime = 0, onLineClick, onShowVisuals, onShowVideo }: { lines: HearsayLine[], currentTime?: number, onLineClick?: (time: number) => void, onShowVisuals?: () => void, onShowVideo?: () => void }) {
   // Find the index of the active line: the last line where startTime <= currentTime
   const activeIndex = lines.reduce((acc, line, idx) => {
     if (line.startTime !== undefined && line.startTime <= currentTime) {
@@ -343,17 +343,30 @@ export default function LyricSheet({ lines, currentTime = 0, onLineClick, onShow
             Hover a line to explore variants
             <Sparkles size={12} />
           </div>
-          {onShowVisuals && (
-            <motion.button
-              whileHover={{ scale: 1.03 }}
-              whileTap={{ scale: 0.97 }}
-              onClick={onShowVisuals}
-              className="flex items-center gap-2 px-6 py-3 rounded-full bg-gradient-to-r from-primary to-accent text-white font-display font-bold text-sm shadow-[0_0_20px_rgba(var(--primary-rgb),0.3)] hover:shadow-[0_0_30px_rgba(var(--primary-rgb),0.5)] transition-all"
-            >
-              <Clapperboard size={16} />
-              Generate Music Video
-            </motion.button>
-          )}
+          <div className="flex items-center gap-3 flex-wrap justify-center sm:justify-end">
+            {onShowVisuals && (
+              <motion.button
+                whileHover={{ scale: 1.03 }}
+                whileTap={{ scale: 0.97 }}
+                onClick={onShowVisuals}
+                className="flex items-center gap-2 px-6 py-3 rounded-full bg-gradient-to-r from-primary to-accent text-white font-display font-bold text-sm shadow-[0_0_20px_rgba(var(--primary-rgb),0.3)] hover:shadow-[0_0_30px_rgba(var(--primary-rgb),0.5)] transition-all"
+              >
+                <Clapperboard size={16} />
+                Image Slideshow
+              </motion.button>
+            )}
+            {onShowVideo && (
+              <motion.button
+                whileHover={{ scale: 1.03 }}
+                whileTap={{ scale: 0.97 }}
+                onClick={onShowVideo}
+                className="flex items-center gap-2 px-6 py-3 rounded-full bg-gradient-to-r from-violet-600 to-fuchsia-600 text-white font-display font-bold text-sm shadow-[0_0_20px_rgba(139,92,246,0.3)] hover:shadow-[0_0_30px_rgba(139,92,246,0.5)] transition-all"
+              >
+                <Video size={16} />
+                Video Clip
+              </motion.button>
+            )}
+          </div>
         </div>
       </div>
     </div>

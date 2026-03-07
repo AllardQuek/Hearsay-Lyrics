@@ -5,12 +5,12 @@ const genAI = new GoogleGenerativeAI(apiKey);
 
 // Using Flash-Lite for speed in hearsay generation
 export const modelLite = genAI.getGenerativeModel({ 
-  model: "models/gemini-3.1-flash-lite", 
+  model: "models/gemini-3.1-flash-lite-preview", 
 });
 
 // Pro for multimodal or complex reasoning (Milestone 2/3)
 export const modelPro = genAI.getGenerativeModel({ 
-  model: "models/gemini-3.1-pro", 
+  model: "models/gemini-3.1-pro-preview", 
 });
 
 /**

@@ -6,6 +6,7 @@ import { Sparkles, Music, Share2, Github, Layout, Loader2, Mic2, ArrowUp, Chevro
 import SongInput from "@/components/SongInput";
 import LyricSheet from "@/components/LyricSheet";
 import LyricVisuals from "@/components/LyricVisuals";
+import VideoClip from "@/components/VideoClip";
 import AudioPlayer, { AudioPlayerRef } from "@/components/AudioPlayer";
 import { HearsayLine } from "@/lib/gemini";
 import { formatHearsayForClipboard } from "@/lib/utils";
@@ -20,6 +21,7 @@ export default function Home() {
   const [activeAudioUrl, setActiveAudioUrl] = useState<string | undefined>(undefined);
   const [showExperimental, setShowExperimental] = useState(false);
   const [showVisuals, setShowVisuals] = useState(false);
+  const [showVideo, setShowVideo] = useState(false);
   const audioPlayerRef = useRef<AudioPlayerRef>(null);
   const resultsHeaderRef = useRef<HTMLDivElement>(null);
   const resultsEndRef = useRef<HTMLDivElement>(null);
@@ -334,8 +336,7 @@ export default function Home() {
                 lines={results}
                 currentTime={currentTime}
                 onLineClick={(time) => audioPlayerRef.current?.seekTo(time)}
-                onShowVisuals={() => setShowVisuals(true)}
-              />
+                onShowVisuals={() => setShowVisuals(true)}                  onShowVideo={() => setShowVideo(true)}              />
 
               {/* In-Progress Indicator (Sticky at bottom during stream) */}
               <AnimatePresence>
@@ -421,6 +422,13 @@ export default function Home() {
       <AnimatePresence>
         {showVisuals && results.length > 0 && (
           <LyricVisuals lines={results} onClose={() => setShowVisuals(false)} />
+        )}
+      </AnimatePresence>
+
+      {/* VideoClip Overlay */}
+      <AnimatePresence>
+        {showVideo && results.length > 0 && (
+          <VideoClip lines={results} onClose={() => setShowVideo(false)} />
         )}
       </AnimatePresence>
     </>
