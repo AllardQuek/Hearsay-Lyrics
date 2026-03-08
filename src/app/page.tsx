@@ -28,34 +28,47 @@ export default function Home() {
   const resultsEndRef = useRef<HTMLDivElement>(null);
   const [isAutoScrollEnabled, setIsAutoScrollEnabled] = useState(true);
   const [showBackToTop, setShowBackToTop] = useState(false);
+  // Track whether a scroll was triggered by our own code so we don't
+  // accidentally disable auto-scroll mid-animation.
+  const isProgrammaticScroll = useRef(false);
+  // Mirror state in a ref so the scroll handler always reads the latest value
+  // without needing to be re-registered every time it changes.
+  const isAutoScrollEnabledRef = useRef(true);
+  useEffect(() => { isAutoScrollEnabledRef.current = isAutoScrollEnabled; }, [isAutoScrollEnabled]);
 
   // Detect manual scroll to disable auto-scroll
   useEffect(() => {
     const handleScroll = () => {
-      if (!loading) return;
+      // Back-to-top button is independent of loading state
+      setShowBackToTop(window.scrollY > 800);
 
-      // Check if user is near bottom (within 150px)
-      const threshold = 150;
+      if (!loading) return;
+      // Ignore scrolls that we triggered ourselves
+      if (isProgrammaticScroll.current) return;
+
+      // User is near bottom if within 300px — generous to avoid false positives
+      const threshold = 300;
       const isAtBottom = window.innerHeight + window.scrollY >= document.documentElement.scrollHeight - threshold;
 
-      if (!isAtBottom && isAutoScrollEnabled) {
+      if (!isAtBottom && isAutoScrollEnabledRef.current) {
         setIsAutoScrollEnabled(false);
-      } else if (isAtBottom && !isAutoScrollEnabled) {
+      } else if (isAtBottom && !isAutoScrollEnabledRef.current) {
         setIsAutoScrollEnabled(true);
       }
-
-      // Show back to top button after 800px
-      setShowBackToTop(window.scrollY > 800);
     };
 
-    window.addEventListener('scroll', handleScroll);
+    window.addEventListener('scroll', handleScroll, { passive: true });
     return () => window.removeEventListener('scroll', handleScroll);
-  }, [loading, isAutoScrollEnabled]);
+  }, [loading]); // only re-register when loading changes; refs handle the rest
 
   // Auto-scroll when results grow
   useEffect(() => {
     if (results.length > 0 && loading && isAutoScrollEnabled) {
+      isProgrammaticScroll.current = true;
       resultsEndRef.current?.scrollIntoView({ behavior: "smooth" });
+      // Clear the flag after the smooth-scroll animation has had time to finish
+      const t = setTimeout(() => { isProgrammaticScroll.current = false; }, 1000);
+      return () => clearTimeout(t);
     }
   }, [results, loading, isAutoScrollEnabled]);
 

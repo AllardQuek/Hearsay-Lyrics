@@ -1,8 +1,5 @@
 import { NextResponse } from "next/server";
-import { GoogleGenAI } from "@google/genai";
-import { modelLite, safeGenerateContent } from "@/lib/gemini";
-
-const genaiClient = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY || "" });
+import { genAI, modelLite, safeGenerateContent } from "@/lib/gemini";
 
 const VISUAL_PROMPT_TEMPLATE = `
 You are a surrealist music video art director. 
@@ -44,7 +41,7 @@ export async function POST(req: Request) {
     // Step 2: Generate image — no retries to avoid burning quota on rate limits
     let imageResponse;
     try {
-      imageResponse = await genaiClient.models.generateContent({
+      imageResponse = await genAI.models.generateContent({
         model: "gemini-3.1-flash-image-preview",
         contents: [
           {
@@ -70,14 +67,20 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: userMessage, isRateLimit: is429 }, { status: is429 ? 429 : 500 });
     }
 
-    // Extract image from response
+    // Extract image from response — skip thought/reasoning parts (thinking model)
     const parts = imageResponse?.candidates?.[0]?.content?.parts ?? [];
     console.log("[imagine] Response parts count:", parts.length);
-    parts.forEach((p: any, i: number) => console.log(`[imagine] part[${i}] keys:`, Object.keys(p), "inlineData?", !!p.inlineData, "data length:", p.inlineData?.data?.length ?? 0));
+    parts.forEach((p, i) => console.log(`[imagine] part[${i}] keys:`, Object.keys(p as object), "thought?", !!(p as Record<string, unknown>).thought, "inlineData?", !!(p as Record<string, unknown>).inlineData, "mimeType:", (p as Record<string, {mimeType?: string}>).inlineData?.mimeType, "data length:", ((p as Record<string, {data?: string}>).inlineData?.data?.length ?? 0)));
     let imageBase64: string | null = null;
     let mimeType = "image/png";
 
     for (const part of parts) {
+      if (part.thought) {
+        const thoughtPart = part as Record<string, unknown>;
+        if (thoughtPart.text) console.log("[imagine] 🤔 thought:", thoughtPart.text);
+        else console.log("[imagine] 🤔 thought image (skipped, bytes:", (thoughtPart.inlineData as Record<string, string> | undefined)?.data?.length ?? 0, ")");
+        continue;
+      }
       if (part.inlineData?.data) {
         imageBase64 = part.inlineData.data;
         mimeType = part.inlineData.mimeType || "image/png";

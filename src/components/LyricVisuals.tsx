@@ -99,8 +99,11 @@ export default function LyricVisuals({ lines, onClose, maxSlides }: LyricVisuals
     generateImage(currentIndex);
   }, [currentIndex, generateImage]);
 
-  // Cleanup on unmount
+  // Reset abort flag on mount; set it on unmount to cancel any in-flight requests.
+  // Must reset to false in setup so React StrictMode's double-invoke doesn't
+  // permanently set it true before the real fetch result arrives.
   useEffect(() => {
+    abortedRef.current = false;
     return () => {
       abortedRef.current = true;
     };

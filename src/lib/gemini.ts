@@ -1,23 +1,28 @@
-import { GoogleGenerativeAI } from "@google/generative-ai";
+import { GoogleGenAI, type Part } from "@google/genai";
 
-const apiKey = process.env.GEMINI_API_KEY || "";
-const genAI = new GoogleGenerativeAI(apiKey);
+const apiKey = process.env.VERTEX_AI_API_KEY || "";
 
-// Using Flash-Lite for speed in hearsay generation
-export const modelLite = genAI.getGenerativeModel({ 
-  model: "gemini-3.1-flash-lite-preview", 
-});
+// Vertex AI Express — uses aiplatform.googleapis.com with API key auth
+export const genAI = new GoogleGenAI({ vertexai: true, apiKey });
 
-// Flash for more complex reasoning tasks
-export const modelPro = genAI.getGenerativeModel({ 
-  model: "gemini-3-flash-preview", 
-});
+// Model name strings for Vertex AI
+export const modelLite = "gemini-3.1-flash-lite-preview";
+export const modelPro = "gemini-3-flash-preview";
 
 /**
- * Utility to call Gemini. Fails fast — no retries to avoid burning quota.
+ * Utility to call Gemini via Vertex AI. Fails fast — no retries to avoid burning quota.
+ * Returns a response wrapper compatible with all existing callers (result.response.text()).
  */
-export async function safeGenerateContent(model: any, prompt: string | any[]) {
-  return model.generateContent(prompt);
+export async function safeGenerateContent(modelName: string, prompt: string | Part[]) {
+  const contents = typeof prompt === "string"
+    ? prompt
+    : prompt.map((item) => (typeof item === "string" ? { text: item } : item));
+  const result = await genAI.models.generateContent({ model: modelName, contents });
+  return {
+    response: {
+      text: () => result.text ?? "",
+    },
+  };
 }
 
 export interface HearsayCandidate {
