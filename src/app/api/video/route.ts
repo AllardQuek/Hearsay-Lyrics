@@ -1,9 +1,6 @@
 import { NextResponse } from "next/server";
-import { GoogleGenAI } from "@google/genai";
-import { modelLite, safeGenerateContent } from "@/lib/gemini";
+import { genAI, modelLite, safeGenerateContent } from "@/lib/gemini";
 import { HearsayLine } from "@/lib/gemini";
-
-const genaiClient = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY || "" });
 
 const VIDEO_PROMPT_TEMPLATE = `
 You are a surrealist music video director. Given a selection of English "hearsay" lyrics (phonetic mishearings of Mandarin pop songs), write a vivid, cinematic scene prompt for a short 8-second music video clip.
@@ -45,7 +42,7 @@ export async function POST(req: Request) {
     console.log(`[video] Scene prompt: ${scenePrompt}`);
 
     // Step 2: Kick off Veo 3.1 video generation (async – returns operation immediately)
-    const operation = await genaiClient.models.generateVideos({
+    const operation = await genAI.models.generateVideos({
       model: "veo-3.1-generate-preview",
       prompt: scenePrompt,
       config: {

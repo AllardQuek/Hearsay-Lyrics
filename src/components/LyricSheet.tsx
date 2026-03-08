@@ -326,6 +326,9 @@ export default function LyricSheet({ lines, currentTime = 0, onLineClick, onShow
 
   const totalSlides = lines.filter((l) => l.candidates?.length > 0).length;
   const [slideCount, setSlideCount] = useState(Math.min(5, totalSlides));
+  // Separate string state so the user can freely edit the input (e.g. backspace to clear)
+  // without it snapping to 1 mid-keystroke. The numeric slideCount is committed on blur.
+  const [slideInput, setSlideInput] = useState(String(Math.min(5, totalSlides)));
 
   return (
     <div className="w-full max-w-6xl mx-auto space-y-2">
@@ -355,8 +358,13 @@ export default function LyricSheet({ lines, currentTime = 0, onLineClick, onShow
                     type="number"
                     min={1}
                     max={totalSlides}
-                    value={slideCount}
-                    onChange={(e) => setSlideCount(Math.max(1, Math.min(totalSlides, parseInt(e.target.value) || 1)))}
+                    value={slideInput}
+                    onChange={(e) => setSlideInput(e.target.value)}
+                    onBlur={() => {
+                      const clamped = Math.max(1, Math.min(totalSlides, parseInt(slideInput) || 1));
+                      setSlideCount(clamped);
+                      setSlideInput(String(clamped));
+                    }}
                     className="w-10 bg-transparent text-white text-center font-display font-bold text-sm outline-none [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
                   />
                   <span className="text-muted/40">/ {totalSlides}</span>

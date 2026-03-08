@@ -1,7 +1,6 @@
 import { NextResponse } from "next/server";
-import { GoogleGenAI, GenerateVideosOperation } from "@google/genai";
-
-const genaiClient = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY || "" });
+import { GenerateVideosOperation } from "@google/genai";
+import { genAI } from "@/lib/gemini";
 
 export async function POST(req: Request) {
   try {
@@ -15,7 +14,7 @@ export async function POST(req: Request) {
     const opHandle = new GenerateVideosOperation();
     opHandle.name = operationName;
 
-    const operation = await genaiClient.operations.getVideosOperation({
+    const operation = await genAI.operations.getVideosOperation({
       operation: opHandle,
     });
 

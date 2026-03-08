@@ -29,6 +29,7 @@ export default function LyricVisuals({ lines, onClose, maxSlides }: LyricVisuals
   const abortedRef = useRef(false);
   // Track which indices are already in-flight or done to prevent duplicate requests.
   // Using a ref avoids the stale-closure problem with the images state guard.
+  // Track which indices have been requested to prevent duplicate fetches (e.g. retry guard).
   const requestedRef = useRef<Set<number>>(new Set());
 
   // Filter lines with actual hearsay content, limited to maxSlides
@@ -42,7 +43,7 @@ export default function LyricVisuals({ lines, onClose, maxSlides }: LyricVisuals
   const generateImage = useCallback(
     async (index: number) => {
       const line = activeLines[index];
-      // Guard: skip if no line, or already requested/in-flight/done
+      // Guard: skip if no line or already requested/in-flight/done.
       if (!line || requestedRef.current.has(index)) return;
       requestedRef.current.add(index);
 
@@ -56,11 +57,7 @@ export default function LyricVisuals({ lines, onClose, maxSlides }: LyricVisuals
         const res = await fetch("/api/imagine", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            hearsayText,
-            meaning: line.meaning,
-            chinese: line.chinese,
-          }),
+          body: JSON.stringify({ hearsayText }),
         });
 
         if (abortedRef.current) return;
@@ -93,21 +90,27 @@ export default function LyricVisuals({ lines, onClose, maxSlides }: LyricVisuals
     [activeLines]
   );
 
-  // Generate image for the current slide on mount and on slide change.
-  // The requestedRef guard ensures each index is only ever requested once.
-  useEffect(() => {
-    generateImage(currentIndex);
-  }, [currentIndex, generateImage]);
-
-  // Reset abort flag on mount; set it on unmount to cancel any in-flight requests.
-  // Must reset to false in setup so React StrictMode's double-invoke doesn't
-  // permanently set it true before the real fetch result arrives.
+  // On mount, generate all slide images sequentially (one at a time) in order.
+  // This avoids parallel requests and 429 rate limits — each image is generated exactly once.
+  // The slideshow just displays whatever is ready; user navigation doesn't trigger new requests.
+  // Must reset abortedRef to false here so React StrictMode's double-invoke doesn't
+  // permanently poison it before the async loop completes.
   useEffect(() => {
     abortedRef.current = false;
+
+    const generateAll = async () => {
+      for (let i = 0; i < activeLines.length; i++) {
+        if (abortedRef.current) break;
+        await generateImage(i);
+      }
+    };
+
+    generateAll();
+
     return () => {
       abortedRef.current = true;
     };
-  }, []);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Auto-advance timer
   useEffect(() => {

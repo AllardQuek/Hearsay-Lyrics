@@ -2,36 +2,34 @@ import { NextResponse } from "next/server";
 import { genAI, modelLite, safeGenerateContent } from "@/lib/gemini";
 
 const VISUAL_PROMPT_TEMPLATE = `
-You are a surrealist music video art director. 
-Given a song lyric and its meaning, generate a single vivid, cinematic, slightly absurd image description.
+You are a surrealist music video art director.
+An English listener misheard a Chinese pop song and imagined the following lyric. Visualize exactly what they pictured — treat it as literal, real, and specific.
 
 The image should:
-- LITERALLY visualize what the English "hearsay" lyric says, even if it's crazy or nonsensical
-- Be specific about subjects, colors, lighting, camera angle, and mood
+- LITERALLY depict what the hearsay phrase says, word for word, no matter how absurd
+- Be specific about subjects, colors, lighting, and camera angle
 - Be 1-2 sentences max. No preamble, no explanations.
 
 Examples:
-- Hearsay: "Man on the moon eating cheese" → "A suited astronaut sitting cross-legged on a glowing moon, fork in hand, eating an enormous wheel of yellow cheese. Cinematic, warm golden light, wide shot."
-- Hearsay: "Baby shark took my heart" → "A cartoonish great white shark wearing a bow tie and holding a glowing red heart in its fin, wide eyes, underwater disco lighting."
+- "Man on the moon eating cheese" → "A suited astronaut sitting cross-legged on a glowing moon, fork in hand, eating an enormous wheel of yellow cheese. Warm golden light, wide cinematic shot."
+- "Baby shark took my heart" → "A cartoonish great white shark in a bow tie clutching a glowing red heart in its fin, wide eyes, underwater disco lighting."
+- "Lose your churn in the sway" → "A wooden butter churn slowly tipping and spinning in a sun-drenched meadow, golden cream arcing through the air mid-sway. Slow-motion, warm afternoon light."
 
 Hearsay lyric: "{hearsay}"
-Original meaning: "{meaning}"
 
 Respond with ONLY the image description, nothing else.
 `;
 
 export async function POST(req: Request) {
   try {
-    const { hearsayText, meaning, chinese } = await req.json();
+    const { hearsayText } = await req.json();
 
     if (!hearsayText) {
       return NextResponse.json({ error: "No lyric provided" }, { status: 400 });
     }
 
-    // Step 1: Use Gemini text model to craft a vivid visual prompt
-    const promptRequest = VISUAL_PROMPT_TEMPLATE
-      .replace("{hearsay}", hearsayText)
-      .replace("{meaning}", meaning || chinese || "");
+    // Step 1: Use Gemini text model to craft a vivid visual prompt from the hearsay text alone
+    const promptRequest = VISUAL_PROMPT_TEMPLATE.replace("{hearsay}", hearsayText);
 
     const promptResult = await safeGenerateContent(modelLite, promptRequest);
     const visualPrompt = promptResult.response.text().trim();
