@@ -30,6 +30,8 @@ export default function VideoClip({ lines, onClose }: VideoClipProps) {
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
   const [phraseIndex, setPhraseIndex] = useState(0);
 
+  const MAX_POLL_SECONDS = 180; // 3-minute hard timeout
+
   const pollTimerRef = useRef<NodeJS.Timeout | null>(null);
   const elapsedTimerRef = useRef<NodeJS.Timeout | null>(null);
   const abortedRef = useRef(false);
@@ -126,9 +128,17 @@ export default function VideoClip({ lines, onClose }: VideoClipProps) {
     // Defer to the next tick so generation runs outside the synchronous effect body
     const startTimer = setTimeout(() => void startGeneration(), 0);
 
-    // Elapsed time counter
+    // Elapsed time counter — also enforces max timeout
     elapsedTimerRef.current = setInterval(() => {
-      setElapsedSeconds((s) => s + 1);
+      setElapsedSeconds((s) => {
+        const next = s + 1;
+        if (next >= MAX_POLL_SECONDS) {
+          stopPolling();
+          setStatus("error");
+          setErrorMsg("Video generation timed out after 3 minutes. Please try again.");
+        }
+        return next;
+      });
     }, 1000);
 
     // Cycle loading phrases

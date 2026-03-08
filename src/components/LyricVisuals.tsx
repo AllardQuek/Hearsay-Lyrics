@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback, useRef } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { X, ChevronLeft, ChevronRight, Clapperboard, Loader2, Sparkles } from "lucide-react";
+import { X, ChevronLeft, ChevronRight, Clapperboard, Loader2, Sparkles, RotateCcw } from "lucide-react";
 import { HearsayLine } from "@/lib/gemini";
 import { cn } from "@/lib/utils";
 
@@ -11,22 +11,29 @@ interface ImageState {
   mimeType: string;
   visualPrompt: string | null;
   status: "idle" | "loading" | "done" | "error";
+  errorMessage?: string;
+  isRateLimit?: boolean;
 }
 
 interface LyricVisualsProps {
   lines: HearsayLine[];
   onClose: () => void;
+  maxSlides?: number;
 }
 
-export default function LyricVisuals({ lines, onClose }: LyricVisualsProps) {
+export default function LyricVisuals({ lines, onClose, maxSlides }: LyricVisualsProps) {
   const [currentIndex, setCurrentIndex] = useState(0);
   const [images, setImages] = useState<Record<number, ImageState>>({});
   const [isPlaying, setIsPlaying] = useState(true);
   const timerRef = useRef<NodeJS.Timeout | null>(null);
   const abortedRef = useRef(false);
+  // Track which indices are already in-flight or done to prevent duplicate requests.
+  // Using a ref avoids the stale-closure problem with the images state guard.
+  const requestedRef = useRef<Set<number>>(new Set());
 
-  // Filter lines with actual hearsay content
-  const activeLines = lines.filter((l) => l.candidates?.length > 0);
+  // Filter lines with actual hearsay content, limited to maxSlides
+  const allActiveLines = lines.filter((l) => l.candidates?.length > 0);
+  const activeLines = maxSlides ? allActiveLines.slice(0, maxSlides) : allActiveLines;
 
   const currentLine = activeLines[currentIndex];
   const currentImage = images[currentIndex];
@@ -35,7 +42,9 @@ export default function LyricVisuals({ lines, onClose }: LyricVisualsProps) {
   const generateImage = useCallback(
     async (index: number) => {
       const line = activeLines[index];
-      if (!line || images[index]?.status === "done" || images[index]?.status === "loading") return;
+      // Guard: skip if no line, or already requested/in-flight/done
+      if (!line || requestedRef.current.has(index)) return;
+      requestedRef.current.add(index);
 
       setImages((prev) => ({
         ...prev,
@@ -56,8 +65,8 @@ export default function LyricVisuals({ lines, onClose }: LyricVisualsProps) {
 
         if (abortedRef.current) return;
 
-        if (!res.ok) throw new Error("Image generation failed");
         const data = await res.json();
+        if (!res.ok) throw Object.assign(new Error(data.error || "Image generation failed"), { isRateLimit: data.isRateLimit });
 
         setImages((prev) => ({
           ...prev,
@@ -70,31 +79,32 @@ export default function LyricVisuals({ lines, onClose }: LyricVisualsProps) {
         }));
       } catch (err) {
         if (abortedRef.current) return;
+        // Allow retry on error by removing from the requested set
+        requestedRef.current.delete(index);
         console.error("[LyricVisuals] Error generating image for line", index, err);
+        const errorMessage = err instanceof Error ? err.message : "Could not generate image";
+        const isRateLimit = (err as any)?.isRateLimit === true;
         setImages((prev) => ({
           ...prev,
-          [index]: { imageBase64: null, mimeType: "image/png", visualPrompt: null, status: "error" },
+          [index]: { imageBase64: null, mimeType: "image/png", visualPrompt: null, status: "error", errorMessage, isRateLimit },
         }));
       }
     },
-    [activeLines, images]
+    [activeLines]
   );
 
-  // Prefetch current + next image
+  // Generate image for the current slide on mount and on slide change.
+  // The requestedRef guard ensures each index is only ever requested once.
   useEffect(() => {
     generateImage(currentIndex);
-    if (currentIndex + 1 < activeLines.length) {
-      generateImage(currentIndex + 1);
-    }
-  }, [currentIndex]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [currentIndex, generateImage]);
 
-  // Start generating first image on mount
+  // Cleanup on unmount
   useEffect(() => {
-    generateImage(0);
     return () => {
       abortedRef.current = true;
     };
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  }, []);
 
   // Auto-advance timer
   useEffect(() => {
@@ -215,7 +225,19 @@ export default function LyricVisuals({ lines, onClose }: LyricVisualsProps) {
               className="absolute inset-0 flex items-center justify-center"
             >
               <div className="absolute inset-0 bg-gradient-to-br from-red-900/30 via-black to-purple-900/30" />
-              <p className="relative text-white/40 text-sm">Could not generate image</p>
+              <div className="relative flex flex-col items-center gap-3 text-center px-6">
+                <p className="text-white/50 text-sm">
+                  {currentImage?.isRateLimit
+                    ? "Quota exceeded — wait a moment then retry"
+                    : currentImage?.errorMessage || "Could not generate image"}
+                </p>
+                <button
+                  onClick={() => generateImage(currentIndex)}
+                  className="flex items-center gap-1.5 px-4 py-2 rounded-full bg-white/10 hover:bg-white/20 text-white/70 hover:text-white text-xs font-bold uppercase tracking-wider transition-all"
+                >
+                  <RotateCcw size={12} /> Retry
+                </button>
+              </div>
             </motion.div>
           ) : (
             <motion.div

@@ -26,8 +26,12 @@ export async function POST(req: Request) {
     const stream = new ReadableStream({
       async start(controller) {
         try {
-          // Process all chunks in parallel for maximum speed
-          const chunkPromises = lineChunks.map(async (chunk, index) => {
+          // Process chunks SEQUENTIALLY to stay within 15 RPM limit.
+          // Each chunk makes 2 serial calls (generate + review), so peak concurrent Gemini
+          // calls is always 1 — well within the rate limit.
+          for (let index = 0; index < lineChunks.length; index++) {
+            const chunk = lineChunks[index];
+
             // Step 1: Creative Generation
             const generationPrompt = `
 ${HEARSAY_PROMPT}
@@ -68,17 +72,14 @@ Return the FIXED JSON array only.
 `;
             const reviewResult = await safeGenerateContent(modelLite, reviewPrompt);
             const responseText = reviewResult.response.text();
-            
+
             const jsonMatch = responseText.match(/\[[\s\S]*\]/);
             if (!jsonMatch) {
               throw new Error(`Failed to find JSON for chunk ${index}`);
             }
-            return JSON.parse(jsonMatch[0]);
-          });
+            const hearsayLines = JSON.parse(jsonMatch[0]);
 
-          // Wait for each promise in ORDER to stream it
-          for (const promise of chunkPromises) {
-            const hearsayLines = await promise;
+            // Stream each chunk to the client as soon as it's ready
             controller.enqueue(encoder.encode(JSON.stringify(hearsayLines) + "\n"));
           }
         } catch (error) {

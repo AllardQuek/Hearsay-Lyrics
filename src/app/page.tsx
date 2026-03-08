@@ -22,6 +22,7 @@ export default function Home() {
   const [showExperimental, setShowExperimental] = useState(false);
   const [showVisuals, setShowVisuals] = useState(false);
   const [showVideo, setShowVideo] = useState(false);
+  const [slideCount, setSlideCount] = useState(5);
   const audioPlayerRef = useRef<AudioPlayerRef>(null);
   const resultsHeaderRef = useRef<HTMLDivElement>(null);
   const resultsEndRef = useRef<HTMLDivElement>(null);
@@ -336,7 +337,7 @@ export default function Home() {
                 lines={results}
                 currentTime={currentTime}
                 onLineClick={(time) => audioPlayerRef.current?.seekTo(time)}
-                onShowVisuals={() => setShowVisuals(true)}                  onShowVideo={() => setShowVideo(true)}              />
+                onShowVisuals={(count) => { setSlideCount(count); setShowVisuals(true); }}                  onShowVideo={() => setShowVideo(true)}              />
 
               {/* In-Progress Indicator (Sticky at bottom during stream) */}
               <AnimatePresence>
@@ -421,7 +422,7 @@ export default function Home() {
       {/* LyricVisuals Overlay */}
       <AnimatePresence>
         {showVisuals && results.length > 0 && (
-          <LyricVisuals lines={results} onClose={() => setShowVisuals(false)} />
+          <LyricVisuals lines={results} maxSlides={slideCount} onClose={() => setShowVisuals(false)} />
         )}
       </AnimatePresence>
 

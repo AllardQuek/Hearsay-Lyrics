@@ -5,36 +5,19 @@ const genAI = new GoogleGenerativeAI(apiKey);
 
 // Using Flash-Lite for speed in hearsay generation
 export const modelLite = genAI.getGenerativeModel({ 
-  model: "models/gemini-3.1-flash-lite-preview", 
+  model: "gemini-3.1-flash-lite-preview", 
 });
 
-// Pro for multimodal or complex reasoning (Milestone 2/3)
+// Flash for more complex reasoning tasks
 export const modelPro = genAI.getGenerativeModel({ 
-  model: "models/gemini-3.1-pro-preview", 
+  model: "gemini-3-flash-preview", 
 });
 
 /**
- * Utility to call Gemini with retries for rate limits (429)
+ * Utility to call Gemini. Fails fast — no retries to avoid burning quota.
  */
-export async function safeGenerateContent(model: any, prompt: string | any[], maxRetries = 3) {
-  let lastError;
-  for (let i = 0; i < maxRetries; i++) {
-    try {
-      const result = await model.generateContent(prompt);
-      return result;
-    } catch (error: any) {
-      lastError = error;
-      // If it's a 429 (Too Many Requests), wait and retry
-      if (error.status === 429 || error.message?.includes("429")) {
-        const waitTime = Math.pow(2, i) * 1000 + Math.random() * 1000;
-        console.warn(`Rate limited. Retrying in ${Math.round(waitTime)}ms... (Attempt ${i + 1}/${maxRetries})`);
-        await new Promise(resolve => setTimeout(resolve, waitTime));
-        continue;
-      }
-      throw error;
-    }
-  }
-  throw lastError;
+export async function safeGenerateContent(model: any, prompt: string | any[]) {
+  return model.generateContent(prompt);
 }
 
 export interface HearsayCandidate {

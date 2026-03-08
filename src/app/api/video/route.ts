@@ -65,7 +65,13 @@ export async function POST(req: Request) {
     });
   } catch (error) {
     console.error("[video] Error starting video generation:", error);
-    const message = error instanceof Error ? error.message : "Video generation failed";
-    return NextResponse.json({ error: message }, { status: 500 });
+    const raw = error instanceof Error ? error.message : String(error);
+    const is429 = (error instanceof Error && (error as Error & { status?: number }).status === 429) || raw.includes("429");
+    const message = is429
+      ? "Video generation quota exceeded — please wait a moment and try again."
+      : raw.includes("not found") || raw.includes("404")
+      ? "Video generation model is unavailable on your current API plan."
+      : "Video generation failed";
+    return NextResponse.json({ error: message }, { status: is429 ? 429 : 500 });
   }
 }

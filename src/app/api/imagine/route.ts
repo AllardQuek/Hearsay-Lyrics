@@ -41,26 +41,39 @@ export async function POST(req: Request) {
 
     console.log(`[imagine] Visual prompt for "${hearsayText}": ${visualPrompt}`);
 
-    // Step 2: Generate image with Nano Banana 2 (gemini-3.1-flash-image-preview)
-    const imageResponse = await genaiClient.models.generateContent({
-      model: "gemini-3.1-flash-image-preview",
-      contents: [
-        {
-          role: "user",
-          parts: [
-            {
-              text: `Generate a single vivid image: ${visualPrompt}. Cinematic 16:9 composition. No text in the image.`,
-            },
-          ],
+    // Step 2: Generate image — no retries to avoid burning quota on rate limits
+    let imageResponse;
+    try {
+      imageResponse = await genaiClient.models.generateContent({
+        model: "gemini-3.1-flash-image-preview",
+        contents: [
+          {
+            role: "user",
+            parts: [
+              {
+                text: `Generate a single vivid image: ${visualPrompt}. Cinematic 16:9 composition. No text in the image.`,
+              },
+            ],
+          },
+        ],
+        config: {
+          responseModalities: ["IMAGE", "TEXT"],
         },
-      ],
-      config: {
-        responseModalities: ["IMAGE", "TEXT"],
-      },
-    });
+      });
+    } catch (err: any) {
+      const is429 = err?.status === 429 || String(err?.message).includes("429");
+      const userMessage = is429
+        ? "Image generation quota exceeded — please wait a moment and try again."
+        : err instanceof Error
+        ? err.message
+        : "Image generation failed";
+      return NextResponse.json({ error: userMessage, isRateLimit: is429 }, { status: is429 ? 429 : 500 });
+    }
 
     // Extract image from response
-    const parts = imageResponse.candidates?.[0]?.content?.parts ?? [];
+    const parts = imageResponse?.candidates?.[0]?.content?.parts ?? [];
+    console.log("[imagine] Response parts count:", parts.length);
+    parts.forEach((p: any, i: number) => console.log(`[imagine] part[${i}] keys:`, Object.keys(p), "inlineData?", !!p.inlineData, "data length:", p.inlineData?.data?.length ?? 0));
     let imageBase64: string | null = null;
     let mimeType = "image/png";
 

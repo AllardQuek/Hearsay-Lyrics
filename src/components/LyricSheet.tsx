@@ -315,7 +315,7 @@ function LyricLineItem({ line: initialLine, index, isActive, onClick }: LyricLin
   );
 }
 
-export default function LyricSheet({ lines, currentTime = 0, onLineClick, onShowVisuals, onShowVideo }: { lines: HearsayLine[], currentTime?: number, onLineClick?: (time: number) => void, onShowVisuals?: () => void, onShowVideo?: () => void }) {
+export default function LyricSheet({ lines, currentTime = 0, onLineClick, onShowVisuals, onShowVideo }: { lines: HearsayLine[], currentTime?: number, onLineClick?: (time: number) => void, onShowVisuals?: (count: number) => void, onShowVideo?: () => void }) {
   // Find the index of the active line: the last line where startTime <= currentTime
   const activeIndex = lines.reduce((acc, line, idx) => {
     if (line.startTime !== undefined && line.startTime <= currentTime) {
@@ -323,6 +323,9 @@ export default function LyricSheet({ lines, currentTime = 0, onLineClick, onShow
     }
     return acc;
   }, -1);
+
+  const totalSlides = lines.filter((l) => l.candidates?.length > 0).length;
+  const [slideCount, setSlideCount] = useState(Math.min(5, totalSlides));
 
   return (
     <div className="w-full max-w-6xl mx-auto space-y-2">
@@ -345,15 +348,29 @@ export default function LyricSheet({ lines, currentTime = 0, onLineClick, onShow
           </div>
           <div className="flex items-center gap-3 flex-wrap justify-center sm:justify-end">
             {onShowVisuals && (
-              <motion.button
-                whileHover={{ scale: 1.03 }}
-                whileTap={{ scale: 0.97 }}
-                onClick={onShowVisuals}
-                className="flex items-center gap-2 px-6 py-3 rounded-full bg-gradient-to-r from-primary to-accent text-white font-display font-bold text-sm shadow-[0_0_20px_rgba(var(--primary-rgb),0.3)] hover:shadow-[0_0_30px_rgba(var(--primary-rgb),0.5)] transition-all"
-              >
-                <Clapperboard size={16} />
-                Image Slideshow
-              </motion.button>
+              <div className="flex items-center gap-2">
+                <div className="flex items-center gap-1.5 px-3 py-2 rounded-full glass border-white/10 text-xs font-bold text-muted/70">
+                  <span className="uppercase tracking-wider">Slides</span>
+                  <input
+                    type="number"
+                    min={1}
+                    max={totalSlides}
+                    value={slideCount}
+                    onChange={(e) => setSlideCount(Math.max(1, Math.min(totalSlides, parseInt(e.target.value) || 1)))}
+                    className="w-10 bg-transparent text-white text-center font-display font-bold text-sm outline-none [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
+                  />
+                  <span className="text-muted/40">/ {totalSlides}</span>
+                </div>
+                <motion.button
+                  whileHover={{ scale: 1.03 }}
+                  whileTap={{ scale: 0.97 }}
+                  onClick={() => onShowVisuals(slideCount)}
+                  className="flex items-center gap-2 px-6 py-3 rounded-full bg-gradient-to-r from-primary to-accent text-white font-display font-bold text-sm shadow-[0_0_20px_rgba(var(--primary-rgb),0.3)] hover:shadow-[0_0_30px_rgba(var(--primary-rgb),0.5)] transition-all"
+                >
+                  <Clapperboard size={16} />
+                  Image Slideshow
+                </motion.button>
+              </div>
             )}
             {onShowVideo && (
               <motion.button
