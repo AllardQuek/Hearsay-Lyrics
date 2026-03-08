@@ -19,7 +19,7 @@ export async function POST(req: Request) {
 
     const prompt = `${AUTO_SYNC_PROMPT}\n\nLyrics:\n${lyrics}`;
 
-    const result = await safeGenerateContent(modelPro, [prompt, audioPart]);
+    const result = await safeGenerateContent(modelPro, [{ text: prompt }, audioPart]);
     const response = await result.response;
     const text = response.text();
 

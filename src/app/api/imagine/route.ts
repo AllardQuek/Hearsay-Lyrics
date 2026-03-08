@@ -55,8 +55,8 @@ export async function POST(req: Request) {
           responseModalities: ["IMAGE", "TEXT"],
         },
       });
-    } catch (err: any) {
-      const is429 = err?.status === 429 || String(err?.message).includes("429");
+    } catch (err: unknown) {
+      const is429 = (err as { status?: number })?.status === 429 || String((err as Error)?.message).includes("429");
       const userMessage = is429
         ? "Image generation quota exceeded — please wait a moment and try again."
         : err instanceof Error

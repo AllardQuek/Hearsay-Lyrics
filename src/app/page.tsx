@@ -19,7 +19,6 @@ export default function Home() {
   const [currentTime, setCurrentTime] = useState(0);
   const [currentSongId, setCurrentSongId] = useState<string | undefined>(undefined);
   const [activeAudioUrl, setActiveAudioUrl] = useState<string | undefined>(undefined);
-  const [showExperimental, setShowExperimental] = useState(false);
   const [showVisuals, setShowVisuals] = useState(false);
   const [showVideo, setShowVideo] = useState(false);
   const [slideCount, setSlideCount] = useState(5);
@@ -81,7 +80,7 @@ export default function Home() {
       }, 500);
       return () => clearTimeout(timer);
     }
-  }, [loading]);
+  }, [loading, results.length]);
 
   const handleGenerate = async (text: string, audioUrl?: string, preComputed?: HearsayLine[], songId?: string) => {
     setLoading(true);
@@ -181,17 +180,7 @@ export default function Home() {
     }
   };
 
-  const handleSyncComplete = (syncData: any[]) => {
-    setResults(prev => prev.map(line => {
-      // Find the matching line
-      const matchingSync = syncData.find(s => s.chinese === line.chinese);
-      if (matchingSync) {
-        return { ...line, startTime: matchingSync.startTime };
-      }
-      return line;
-    }));
-    setShowExperimental(false);
-  };
+
 
   const LOADING_PHRASES = [
     "Mixing next verses...",

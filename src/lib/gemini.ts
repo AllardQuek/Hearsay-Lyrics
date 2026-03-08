@@ -3,6 +3,7 @@ import { GoogleGenAI, type Part } from "@google/genai";
 const apiKey = process.env.VERTEX_AI_API_KEY || "";
 
 // Vertex AI Express — uses aiplatform.googleapis.com with API key auth
+// Supports: Gemini text, image generation
 export const genAI = new GoogleGenAI({ vertexai: true, apiKey });
 
 // Model name strings for Vertex AI
@@ -13,7 +14,7 @@ export const modelPro = "gemini-3-flash-preview";
  * Utility to call Gemini via Vertex AI. Fails fast — no retries to avoid burning quota.
  * Returns a response wrapper compatible with all existing callers (result.response.text()).
  */
-export async function safeGenerateContent(modelName: string, prompt: string | Part[]) {
+export async function safeGenerateContent(modelName: string, prompt: string | (string | Part)[]) {
   const contents = typeof prompt === "string"
     ? prompt
     : prompt.map((item) => (typeof item === "string" ? { text: item } : item));

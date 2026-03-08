@@ -1,20 +1,24 @@
 import { NextResponse } from "next/server";
-import { genAI, modelLite, safeGenerateContent } from "@/lib/gemini";
+import { GoogleAuth } from "google-auth-library";
 import { HearsayLine } from "@/lib/gemini";
 
-const VIDEO_PROMPT_TEMPLATE = `
-You are a surrealist music video director. Given a selection of English "hearsay" lyrics (phonetic mishearings of Mandarin pop songs), write a vivid, cinematic scene prompt for a short 8-second music video clip.
+const PROJECT_ID = process.env.GCP_PROJECT_ID || "gen-lang-client-0291259273";
+const LOCATION = "us-central1";
+const VEO_MODEL = "veo-3.1-fast-generate-001";
+const VEO_ENDPOINT = `https://${LOCATION}-aiplatform.googleapis.com/v1/projects/${PROJECT_ID}/locations/${LOCATION}/publishers/google/models/${VEO_MODEL}:predictLongRunning`;
 
-The clip should LITERALLY visualize what these lyrics say — lean into the absurdity, make it colorful and energetic. Think: anime aesthetics, dreamlike settings, playful characters.
-
-Be specific about: visual style, characters, setting, camera movement, mood and lighting.
-Write 2-3 sentences MAX. No preamble or explanations.
-
-Lyrics to visualize:
-{lyrics}
-
-Respond with ONLY the scene description.
-`.trim();
+async function getAccessToken(): Promise<string> {
+  const keyJson = process.env.GCP_SERVICE_ACCOUNT_JSON;
+  if (!keyJson) throw new Error("GCP_SERVICE_ACCOUNT_JSON env var is not set");
+  const auth = new GoogleAuth({
+    credentials: JSON.parse(keyJson),
+    scopes: ["https://www.googleapis.com/auth/cloud-platform"],
+  });
+  const client = await auth.getClient();
+  const { token } = await client.getAccessToken();
+  if (!token) throw new Error("Failed to obtain access token");
+  return token;
+}
 
 export async function POST(req: Request) {
   try {
@@ -24,51 +28,70 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "No lyrics provided" }, { status: 400 });
     }
 
-    // Pick up to 5 lines with actual hearsay content
-    const activeLines = lines.filter((l) => l.candidates?.length > 0).slice(0, 5);
+    // Pick the best 3 lines: prefer longer/weirder hearsay text for more vivid visuals
+    const activeLines = lines
+      .filter((l) => l.candidates?.length > 0)
+      .sort((a, b) => (b.candidates[0].text?.length ?? 0) - (a.candidates[0].text?.length ?? 0))
+      .slice(0, 3);
     if (activeLines.length === 0) {
       return NextResponse.json({ error: "No valid lyric lines found" }, { status: 400 });
     }
 
-    const lyricsText = activeLines
-      .map((l) => `"${l.candidates[0].text}" (means: ${l.meaning || l.chinese})`)
-      .join("\n");
+    // Use only the hearsay text — no original meanings, the video should visualize the mishearing
+    const hearsayLines = activeLines.map((l) => l.candidates[0].text);
 
-    // Step 1: Generate a vivid visual scene prompt via Gemini text model
-    const rawPrompt = VIDEO_PROMPT_TEMPLATE.replace("{lyrics}", lyricsText);
-    const promptResult = await safeGenerateContent(modelLite, rawPrompt);
-    const scenePrompt = promptResult.response.text().trim();
+    // Build the Veo prompt directly from the literal hearsay words — no LLM reinterpretation.
+    // Each line is treated as a literal scene element so the video stays true to the mishearing.
+    const scenePrompt = [
+      "Surrealist anime music video, 8 seconds, vivid neon colors, dreamlike setting.",
+      "Literally visualize these English lyrics word-for-word:",
+      hearsayLines.map((l) => `\"${l}\"`).join(" / "),
+      "Cinematic 16:9, energetic camera movement, no text on screen.",
+    ].join(" ");
 
     console.log(`[video] Scene prompt: ${scenePrompt}`);
 
-    // Step 2: Kick off Veo 3.1 video generation (async – returns operation immediately)
-    const operation = await genAI.models.generateVideos({
-      model: "veo-3.1-generate-preview",
-      prompt: scenePrompt,
-      config: {
-        numberOfVideos: 1,
-        durationSeconds: 8,
-        aspectRatio: "16:9",
+    // Step 2: Kick off Veo video generation via Vertex AI REST API
+    const accessToken = await getAccessToken();
+    const veoRes = await fetch(VEO_ENDPOINT, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": `Bearer ${accessToken}`,
       },
+      body: JSON.stringify({
+        instances: [{ prompt: scenePrompt }],
+        parameters: {
+          sampleCount: 1,
+          durationSeconds: 8,
+          aspectRatio: "16:9",
+          generateAudio: true,
+        },
+      }),
     });
 
-    if (!operation.name) {
+    const veoData = await veoRes.json();
+    if (!veoRes.ok) {
+      console.error("[video] Veo API error:", JSON.stringify(veoData));
+      const is429 = veoRes.status === 429;
+      const message = is429
+        ? "Video generation quota exceeded — please wait a moment and try again."
+        : veoData?.error?.message || "Video generation failed";
+      return NextResponse.json({ error: message, isRateLimit: is429 }, { status: veoRes.status });
+    }
+
+    const operationName = veoData.name;
+    if (!operationName) {
       return NextResponse.json({ error: "Failed to start video generation" }, { status: 500 });
     }
 
     return NextResponse.json({
-      operationName: operation.name,
+      operationName,
       scenePrompt,
     });
   } catch (error) {
     console.error("[video] Error starting video generation:", error);
-    const raw = error instanceof Error ? error.message : String(error);
-    const is429 = (error instanceof Error && (error as Error & { status?: number }).status === 429) || raw.includes("429");
-    const message = is429
-      ? "Video generation quota exceeded — please wait a moment and try again."
-      : raw.includes("not found") || raw.includes("404")
-      ? "Video generation model is unavailable on your current API plan."
-      : "Video generation failed";
-    return NextResponse.json({ error: message }, { status: is429 ? 429 : 500 });
+    const message = error instanceof Error ? error.message : "Video generation failed";
+    return NextResponse.json({ error: message }, { status: 500 });
   }
 }
