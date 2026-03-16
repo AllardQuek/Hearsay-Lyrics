@@ -6,60 +6,58 @@ This document shows how Hearsay Lyrics connects the frontend, backend APIs, Gemi
 
 ```mermaid
 flowchart TB
-  user[User in Browser]
+    user[User in Browser]
 
-  subgraph frontend[Next.js Frontend]
-    ui[UI Components\nSongInput, LyricSheet, PerformView]
-    page[Client Orchestrator\nsrc/app/page.tsx]
-  end
+    subgraph frontend[Next.js Frontend]
+        ui["UI Components\nSongInput, LyricSheet, PerformView"]
+        page["Client Orchestrator\nsrc/app/page.tsx"]
+    end
 
-  subgraph backend[Next.js API Layer]
-    apiGenerate[/POST /api/generate/]
-    apiRefine[/POST /api/refine/]
-    apiDirector[/POST /api/director\nNDJSON stream/]
-    apiImagine[/POST /api/imagine/]
-    apiSync[/POST /api/sync/]
-    apiVideo[/POST /api/video/]
-    apiVideoStatus[/POST /api/video/status/]
-    apiCache[/POST /api/cache/]
-  end
+    subgraph backend[Next.js API Layer]
+        apiGenerate[POST /api/generate]
+        apiRefine[POST /api/refine]
+        apiDirector["POST /api/director\nNDJSON stream"]
+        apiImagine[POST /api/imagine]
+        apiSync[POST /api/sync]
+        apiVideo[POST /api/video]
+        apiVideoStatus[POST /api/video/status]
+        apiCache[POST /api/cache]
+    end
 
-  subgraph ai[Google AI Services]
-    geminiText[Gemini Text Models\nvia @google/genai + Vertex AI]
-    geminiImage[Gemini Image Model\ngemini-3.1-flash-image-preview]
-    veo[Veo Video Model\nVertex AI REST API]
-  end
+    subgraph ai[Google AI Services]
+        geminiText["Gemini Text Models\nvia @google/genai + Vertex AI"]
+        geminiImage["Gemini Image Model\ngemini-3.1-flash-image-preview"]
+        veo["Veo Video Model\nVertex AI REST API"]
+    end
 
-  subgraph storage[Storage Layer]
-    cacheFiles[(JSON Cache Files\npublic/cache/*.json)]
-  end
+    subgraph storage[Storage Layer]
+        cacheFiles[("JSON Cache Files\npublic/cache/*.json")]
+    end
 
-  user --> ui
-  ui --> page
+    user --> ui
+    ui --> page
+    page --> apiGenerate
+    page --> apiRefine
+    page --> apiDirector
+    page --> apiImagine
+    page --> apiSync
+    page --> apiVideo
+    page --> apiVideoStatus
+    page --> apiCache
 
-  page --> apiGenerate
-  page --> apiRefine
-  page --> apiDirector
-  page --> apiImagine
-  page --> apiSync
-  page --> apiVideo
-  page --> apiVideoStatus
-  page --> apiCache
+    apiGenerate --> geminiText
+    apiRefine --> geminiText
+    apiSync --> geminiText
+    apiDirector --> geminiText
+    apiDirector --> geminiImage
+    apiImagine --> geminiText
+    apiImagine --> geminiImage
+    apiVideo --> veo
+    apiVideoStatus --> veo
 
-  apiGenerate --> geminiText
-  apiRefine --> geminiText
-  apiSync --> geminiText
-  apiDirector --> geminiText
-  apiDirector --> geminiImage
-  apiImagine --> geminiText
-  apiImagine --> geminiImage
-
-  apiVideo --> veo
-  apiVideoStatus --> veo
-
-  apiDirector <--> cacheFiles
-  apiCache --> cacheFiles
-  page -.->|reads prebuilt cache via GET /cache/{songId}.json| cacheFiles
+    apiDirector <--> cacheFiles
+    apiCache --> cacheFiles
+    page -.->|"reads prebuilt cache\nvia GET /cache/{songId}.json"| cacheFiles
 ```
 
 ## Key Connections
