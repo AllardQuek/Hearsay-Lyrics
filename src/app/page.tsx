@@ -401,7 +401,7 @@ export default function Home() {
               <Layout size={16} /> Portfolio
             </a>
           </div>
-          <p>&copy; 2026 Hearsay Lyrics. Built for Gemini 3 Hackathon Singapore.</p>
+          <p>&copy; 2026 Hearsay Lyrics.</p>
         </footer>
 
         {/* Floating Action Button - Back to Top */}
