@@ -80,7 +80,11 @@ export default function LyricVisuals({ lines, onClose, maxSlides }: LyricVisuals
         requestedRef.current.delete(index);
         console.error("[LyricVisuals] Error generating image for line", index, err);
         const errorMessage = err instanceof Error ? err.message : "Could not generate image";
-        const isRateLimit = (err as any)?.isRateLimit === true;
+        const isRateLimit =
+          typeof err === "object" &&
+          err !== null &&
+          "isRateLimit" in err &&
+          (err as { isRateLimit?: boolean }).isRateLimit === true;
         setImages((prev) => ({
           ...prev,
           [index]: { imageBase64: null, mimeType: "image/png", visualPrompt: null, status: "error", errorMessage, isRateLimit },
@@ -173,7 +177,7 @@ export default function LyricVisuals({ lines, onClose, maxSlides }: LyricVisuals
       {/* Progress bar */}
       <div className="absolute top-0 left-0 right-0 h-1 bg-white/10 z-20">
         <motion.div
-          className="h-full bg-gradient-to-r from-primary to-accent"
+          className="h-full bg-primary"
           animate={{ width: `${progressPercent}%` }}
           transition={{ duration: 0.4 }}
         />
@@ -187,7 +191,7 @@ export default function LyricVisuals({ lines, onClose, maxSlides }: LyricVisuals
             onClick={() => goTo(i)}
             className={cn(
               "rounded-full transition-all duration-300",
-              i === currentIndex ? "w-5 h-1.5 bg-white" : "w-1.5 h-1.5 bg-white/30 hover:bg-white/60"
+              i === currentIndex ? "w-6 h-1 bg-white" : "w-2 h-1 bg-white/30 hover:bg-white/60"
             )}
           />
         ))}
@@ -196,7 +200,7 @@ export default function LyricVisuals({ lines, onClose, maxSlides }: LyricVisuals
       {/* Close button */}
       <button
         onClick={onClose}
-        className="absolute top-4 right-4 z-20 p-2 rounded-full bg-black/50 text-white/70 hover:text-white hover:bg-black/80 transition-all backdrop-blur-sm"
+        className="absolute top-4 right-4 z-20 p-2 border border-white/10 bg-black/40 rounded-full text-white/70 hover:text-white hover:bg-white/10 transition-all backdrop-blur-md shadow-sm"
       >
         <X size={20} />
       </button>
@@ -212,12 +216,13 @@ export default function LyricVisuals({ lines, onClose, maxSlides }: LyricVisuals
               exit={{ opacity: 0 }}
               className="absolute inset-0 flex flex-col items-center justify-center gap-4"
             >
-              {/* Animated gradient background while loading */}
-              <div className="absolute inset-0 bg-gradient-to-br from-primary/20 via-black to-accent/20 animate-pulse" />
-              <div className="relative z-10 flex flex-col items-center gap-3">
-                <Loader2 size={32} className="text-white/60 animate-spin" />
-                <div className="flex items-center gap-2 text-white/40 text-xs uppercase tracking-widest font-bold">
-                  <Sparkles size={12} />
+              {/* Animated background while loading */}
+              <div className="absolute inset-0 bg-black/80 flex items-center justify-center pointer-events-none backdrop-blur-sm">
+              </div>
+              <div className="relative z-10 flex flex-col items-center gap-3 bg-black/40 backdrop-blur-md rounded-2xl shadow-xl border border-primary/20 p-8">
+                <Loader2 size={32} className="text-primary animate-spin" />
+                <div className="flex items-center gap-2 text-primary/80 text-sm font-medium tracking-wide">
+                  <Sparkles size={14} className="text-primary" />
                   Generating visual...
                 </div>
               </div>
@@ -228,20 +233,20 @@ export default function LyricVisuals({ lines, onClose, maxSlides }: LyricVisuals
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
-              className="absolute inset-0 flex items-center justify-center"
+              className="absolute inset-0 flex items-center justify-center backdrop-blur-sm"
             >
-              <div className="absolute inset-0 bg-gradient-to-br from-red-900/30 via-black to-purple-900/30" />
-              <div className="relative flex flex-col items-center gap-3 text-center px-6">
-                <p className="text-white/50 text-sm">
+              <div className="absolute inset-0 bg-red-900/5 pointer-events-none" />
+              <div className="relative flex flex-col items-center gap-4 text-center p-8 rounded-2xl shadow-xl border border-red-500/20 bg-black/60 backdrop-blur-md">
+                <p className="text-white/70 text-sm font-medium">
                   {currentImage?.isRateLimit
                     ? "Quota exceeded — wait a moment then retry"
                     : currentImage?.errorMessage || "Could not generate image"}
                 </p>
                 <button
                   onClick={() => generateImage(currentIndex)}
-                  className="flex items-center gap-1.5 px-4 py-2 rounded-full bg-white/10 hover:bg-white/20 text-white/70 hover:text-white text-xs font-bold uppercase tracking-wider transition-all"
+                  className="flex items-center gap-2 px-5 py-2.5 rounded-full border border-white/10 bg-white/5 hover:bg-white/10 text-white/80 hover:text-white text-sm font-medium transition-all shadow-sm"
                 >
-                  <RotateCcw size={12} /> Retry
+                  <RotateCcw size={14} /> Retry
                 </button>
               </div>
             </motion.div>
@@ -315,32 +320,32 @@ export default function LyricVisuals({ lines, onClose, maxSlides }: LyricVisuals
       </div>
 
       {/* Nav controls */}
-      <div className="absolute bottom-5 left-1/2 -translate-x-1/2 flex items-center gap-4 z-20">
+      <div className="absolute bottom-6 left-1/2 -translate-x-1/2 flex items-center gap-6 z-20 bg-black/40 backdrop-blur-md rounded-full px-4 py-2 border border-white/10 shadow-lg">
         <button
           onClick={() => goTo(currentIndex - 1)}
           disabled={currentIndex === 0}
-          className="p-3 rounded-full bg-white/10 hover:bg-white/20 text-white disabled:opacity-20 transition-all backdrop-blur-sm"
+          className="p-2 rounded-full text-white/70 hover:text-white hover:bg-white/10 disabled:opacity-20 transition-all"
         >
-          <ChevronLeft size={20} />
+          <ChevronLeft size={22} />
         </button>
 
-        <span className="text-white/40 text-xs font-bold uppercase tracking-widest tabular-nums">
+        <span className="text-white/60 text-sm font-medium tabular-nums min-w-[3rem] text-center">
           {currentIndex + 1} / {activeLines.length}
         </span>
 
         <button
           onClick={() => goTo(currentIndex + 1)}
           disabled={currentIndex === activeLines.length - 1}
-          className="p-3 rounded-full bg-white/10 hover:bg-white/20 text-white disabled:opacity-20 transition-all backdrop-blur-sm"
+          className="p-2 rounded-full text-white/70 hover:text-white hover:bg-white/10 disabled:opacity-20 transition-all"
         >
-          <ChevronRight size={20} />
+          <ChevronRight size={22} />
         </button>
       </div>
 
       {/* Brand watermark */}
-      <div className="absolute bottom-5 right-5 flex items-center gap-1.5 text-white/20 text-[10px] font-black uppercase tracking-widest z-20">
-        <Clapperboard size={12} />
-        Hearsay Visuals
+      <div className="absolute bottom-6 right-6 flex items-center gap-2 text-white/30 text-xs font-medium tracking-wide z-20 mix-blend-overlay">
+        <Clapperboard size={14} className="opacity-70" />
+        <span className="opacity-70">Hearsay Visuals</span>
       </div>
     </motion.div>
   );

@@ -1,3 +1,5 @@
+import type { HearsayLine } from "@/lib/gemini";
+
 export interface ExampleSong {
   id: string;
   title: string;
@@ -5,7 +7,7 @@ export interface ExampleSong {
   lyrics: string;
   audioUrl?: string;
   // Pre-calculated hearsay lines (optional, for demo speed)
-  preComputedLines?: any[]; 
+  preComputedLines?: HearsayLine[];
 }
 
 export const EXAMPLE_SONGS: ExampleSong[] = [
@@ -29,7 +31,7 @@ export const EXAMPLE_SONGS: ExampleSong[] = [
 甜蜜得很輕易
 親愛的 別任性 你的眼睛
 在說我願意`,
-    audioUrl: "https://www.youtube.com/watch?v=bu7nU9Mhpyo",
+    audioUrl: "/audio/love-confession.mp3",
     preComputedLines: [
       {
         chinese: "塞納河畔 左岸的咖啡",

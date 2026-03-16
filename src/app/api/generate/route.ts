@@ -1,20 +1,16 @@
 import { NextResponse } from "next/server";
-import { modelLite, HEARSAY_PROMPT, HearsayLine, safeGenerateContent } from "@/lib/gemini";
+import { modelLite, HEARSAY_PROMPT, safeGenerateContent } from "@/lib/gemini";
 import { getLineLevelPinyin } from "@/lib/pinyin";
 import { PHONETIC_ANCHORS, BANNED_PATTERNS } from "@/lib/phonetic-anchors";
 
 export async function POST(req: Request) {
   try {
-    const { text, funnyWeight = 0.5, audioUrl } = await req.json();
+    const { text, funnyWeight = 0.5 } = await req.json();
 
     if (!text) {
       return NextResponse.json({ error: "No text provided" }, { status: 400 });
     }
 
-    // In a real implementation with Gemini File API, we would download the audioUrl 
-    // and upload it to Gemini here. For now, we'll signal the intent to the prompt.
-    const isUltraMode = !!audioUrl;
-    
     const allLines = getLineLevelPinyin(text);
     const chunkSize = 10;
     const lineChunks: (typeof allLines)[] = [];

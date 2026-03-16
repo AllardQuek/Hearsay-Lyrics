@@ -2,7 +2,7 @@
 
 import { motion, AnimatePresence } from "framer-motion";
 import { RefreshCw, Copy, Check, Sparkles, Pencil, Save, X, Send, Loader2, Clapperboard, Video } from "lucide-react";
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, type ComponentType } from "react";
 import { cn } from "@/lib/utils";
 import { HearsayLine } from "@/lib/gemini";
 
@@ -21,26 +21,26 @@ function ActionButton({
   className 
 }: { 
   onClick: (e: React.MouseEvent) => void;
-  icon: any;
+  icon: ComponentType<{ size?: number; className?: string }>;
   variant?: 'white' | 'primary' | 'accent' | 'success';
   title: string;
   className?: string;
 }) {
   const variants = {
-    white: "hover:bg-white hover:text-black hover:shadow-[0_0_20px_rgba(255,255,255,0.3)]",
-    primary: "hover:bg-primary hover:text-white hover:shadow-[0_0_20px_rgba(var(--primary-rgb),0.5)]",
-    accent: "hover:bg-accent hover:text-white hover:shadow-[0_0_20px_rgba(var(--accent-rgb),0.5)]",
-    success: "bg-green-500/10 text-green-500 border-green-500/50 hover:bg-green-500 hover:text-white"
+    white: "hover:bg-white hover:text-black",
+    primary: "hover:bg-primary hover:text-black",
+    accent: "hover:bg-accent hover:text-black",
+    success: "bg-green-500/10 text-green-500 border-green-500 hover:bg-green-500 hover:text-black"
   };
 
   return (
     <motion.button
-      whileHover={{ scale: 1.1, y: -2 }}
+      whileHover={{ y: -2 }}
       whileTap={{ scale: 0.95 }}
       onClick={onClick}
       title={title}
       className={cn(
-        "p-3 rounded-full glass border border-white/10 transition-all duration-200 group/btn",
+        "p-3 rounded-none border border-white/20 bg-black transition-colors duration-200 group/btn",
         variants[variant],
         className
       )}
@@ -159,15 +159,15 @@ function LyricLineItem({ line: initialLine, index, isActive, onClick }: LyricLin
       onMouseLeave={() => setIsHovered(false)}
       onClick={() => line.startTime !== undefined && onClick?.(line.startTime)}
       className={cn(
-        "relative group py-8 px-6 rounded-2xl transition-all duration-300 cursor-pointer border border-transparent",
-        isActive ? "bg-white/10 border-white/20 scale-[1.02] shadow-[0_0_40px_rgba(255,255,255,0.05)]" : "hover:bg-white/5 hover:border-white/10"
+        "relative group py-8 px-6 transition-colors duration-300 cursor-pointer border-l-4",
+        isActive ? "bg-white/5 border-primary" : "border-transparent hover:bg-white/5 hover:border-white/20"
       )}
     >
       <div className="flex flex-col md:flex-row md:items-center gap-4 md:gap-12">
         {/* Original Text Reference */}
         <div className="w-full md:w-1/4 space-y-1 opacity-40 group-hover:opacity-100 transition-opacity duration-300">
-          <div className="text-sm font-medium text-primary tracking-wide">{line.chinese}</div>
-          <div className="text-[10px] uppercase tracking-widest font-bold font-display italic">{line.pinyin}</div>
+          <div className="text-sm font-sans font-bold uppercase text-primary tracking-widest">{line.chinese}</div>
+          <div className="text-[10px] font-mono font-medium text-white/60 tracking-wider italic">{line.pinyin}</div>
         </div>
 
         {/* Main Hearsay Lyric */}
@@ -176,9 +176,9 @@ function LyricLineItem({ line: initialLine, index, isActive, onClick }: LyricLin
             {isEditing ? (
               <motion.div
                 key="edit-box"
-                initial={{ opacity: 0, scale: 0.95 }}
-                animate={{ opacity: 1, scale: 1 }}
-                exit={{ opacity: 0, scale: 0.95 }}
+                initial={{ opacity: 0, y: 5 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: 5 }}
                 className="w-full space-y-3"
               >
                 <input
@@ -186,29 +186,29 @@ function LyricLineItem({ line: initialLine, index, isActive, onClick }: LyricLin
                   value={editValue}
                   onChange={(e) => setEditValue(e.target.value)}
                   onKeyDown={(e) => e.key === "Enter" && handleSaveEdit()}
-                  className="w-full bg-white/5 border border-white/20 rounded-xl px-4 py-3 text-3xl font-display font-black text-white focus:outline-none focus:border-primary/50 transition-colors"
+                  className="w-full bg-black/40 border border-primary/50 rounded-xl px-4 py-3 text-3xl font-display font-medium text-white focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary/50 transition-all shadow-inner"
                 />
                 <div className="flex gap-2">
                   <button
                     onClick={handleSaveEdit}
-                    className="flex items-center gap-2 px-4 py-2 rounded-lg bg-primary text-white text-xs font-bold uppercase transition-all hover:scale-105"
+                    className="flex items-center gap-2 px-5 py-2.5 bg-primary text-white text-sm font-medium transition-all hover:bg-primary/90 rounded-full shadow-sm hover:shadow-md"
                   >
-                    <Save size={14} /> Save Edit
+                    <Save size={16} /> Save Edit
                   </button>
                   <button
                     onClick={() => setIsEditing(false)}
-                    className="flex items-center gap-2 px-4 py-2 rounded-lg bg-white/10 text-white text-xs font-bold uppercase transition-all hover:bg-white/20"
+                    className="flex items-center gap-2 px-5 py-2.5 border border-white/10 text-white/80 text-sm font-medium transition-all hover:bg-white/10 hover:text-white rounded-full"
                   >
-                    <X size={14} /> Cancel
+                    <X size={16} /> Cancel
                   </button>
                 </div>
               </motion.div>
             ) : isRefining ? (
               <motion.div
                 key="refine-box"
-                initial={{ opacity: 0, scale: 0.95 }}
-                animate={{ opacity: 1, scale: 1 }}
-                exit={{ opacity: 0, scale: 0.95 }}
+                initial={{ opacity: 0, y: 5 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: 5 }}
                 className="w-full space-y-3"
               >
                 <div className="relative">
@@ -218,12 +218,12 @@ function LyricLineItem({ line: initialLine, index, isActive, onClick }: LyricLin
                     value={refineComment}
                     onChange={(e) => setRefineComment(e.target.value)}
                     onKeyDown={(e) => e.key === "Enter" && !loading && handleRefine()}
-                    className="w-full bg-white/5 border border-white/20 rounded-xl px-4 py-3 text-lg font-medium text-white focus:outline-none focus:border-accent/50 transition-colors pr-12"
+                    className="w-full bg-black/40 border border-accent/50 rounded-xl px-4 py-3 text-lg font-medium text-white focus:outline-none focus:border-accent focus:ring-1 focus:ring-accent/50 transition-all pr-12 shadow-inner"
                   />
                   <button
                     onClick={handleRefine}
                     disabled={loading}
-                    className="absolute right-2 top-1/2 -translate-y-1/2 p-2 text-accent hover:scale-110 transition-transform disabled:opacity-50"
+                    className="absolute right-2 top-1/2 -translate-y-1/2 p-2 text-accent hover:text-white transition-colors disabled:opacity-50"
                   >
                     {loading ? <Loader2 size={18} className="animate-spin" /> : <Send size={18} />}
                   </button>
@@ -235,7 +235,7 @@ function LyricLineItem({ line: initialLine, index, isActive, onClick }: LyricLin
                       initial={{ opacity: 0, y: 5 }}
                       animate={{ opacity: 1, y: 0 }}
                       exit={{ opacity: 0, y: -5 }}
-                      className="text-[10px] text-muted uppercase tracking-widest font-bold"
+                      className="text-[10px] text-muted font-medium text-white/60 tracking-wider"
                     >
                       {loading ? REFINE_PHRASES[refinePhraseIndex] : "Type a hint and press Enter"}
                     </motion.p>
@@ -332,27 +332,25 @@ export default function LyricSheet({ lines, currentTime = 0, onLineClick, onShow
 
   return (
     <div className="w-full max-w-6xl mx-auto space-y-2">
-      <div className="glass rounded-[2rem] p-4 md:p-12 shadow-2xl relative overflow-hidden">
-        {/* Decorative background element */}
-        <div className="absolute top-0 right-0 -translate-y-1/2 translate-x-1/2 w-96 h-96 bg-primary/10 blur-[80px] rounded-full pointer-events-none" />
+      <div className="border border-white/20 bg-black p-4 md:p-12 relative overflow-hidden">
         
-        <div className="relative divide-y divide-white/5">
+        <div className="relative divide-y divide-white/5 border-t border-b border-white/5">
           {lines.map((line, idx) => (
             <LyricLineItem key={idx} line={line} index={idx} isActive={idx === activeIndex} onClick={onLineClick} />
           ))}
         </div>
 
         {/* Bottom utility bar */}
-        <div className="mt-12 pt-8 border-t border-white/5 flex flex-col sm:flex-row items-center justify-between gap-4">
-          <div className="inline-flex items-center gap-2 text-muted/40 text-xs font-bold uppercase tracking-widest">
-            <Sparkles size={12} />
-            Hover a line to explore variants
-            <Sparkles size={12} />
+        <div className="mt-12 pt-8 flex flex-col sm:flex-row items-center justify-between gap-4">
+          <div className="inline-flex items-center gap-2 text-white/50 text-[10px] font-mono font-bold uppercase tracking-widest">
+            <Sparkles size={12} className="text-primary" />
+            Hover over a line to edit lyrics or see variants
+            <Sparkles size={12} className="text-accent" />
           </div>
           <div className="flex items-center gap-3 flex-wrap justify-center sm:justify-end">
             {onShowVisuals && (
               <div className="flex items-center gap-2">
-                <div className="flex items-center gap-1.5 px-3 py-2 rounded-full glass border-white/10 text-xs font-bold text-muted/70">
+                <div className="flex items-center gap-1.5 px-3 py-2 border border-white/20 text-xs font-mono font-bold text-white/70">
                   <span className="uppercase tracking-wider">Slides</span>
                   <input
                     type="number"
@@ -365,15 +363,15 @@ export default function LyricSheet({ lines, currentTime = 0, onLineClick, onShow
                       setSlideCount(clamped);
                       setSlideInput(String(clamped));
                     }}
-                    className="w-10 bg-transparent text-white text-center font-display font-bold text-sm outline-none [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
+                    className="w-10 bg-transparent text-primary text-center font-mono font-bold text-sm outline-none [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none border-b border-white/20"
                   />
-                  <span className="text-muted/40">/ {totalSlides}</span>
+                  <span className="text-white/40">/ {totalSlides}</span>
                 </div>
                 <motion.button
                   whileHover={{ scale: 1.03 }}
                   whileTap={{ scale: 0.97 }}
                   onClick={() => onShowVisuals(slideCount)}
-                  className="flex items-center gap-2 px-6 py-3 rounded-full bg-gradient-to-r from-primary to-accent text-white font-display font-bold text-sm shadow-[0_0_20px_rgba(var(--primary-rgb),0.3)] hover:shadow-[0_0_30px_rgba(var(--primary-rgb),0.5)] transition-all"
+                  className="flex items-center gap-2 px-6 py-3 bg-primary text-black font-sans font-bold text-sm uppercase tracking-widest hover:bg-white transition-colors"
                 >
                   <Clapperboard size={16} />
                   Image Slideshow
@@ -385,7 +383,7 @@ export default function LyricSheet({ lines, currentTime = 0, onLineClick, onShow
                 whileHover={{ scale: 1.03 }}
                 whileTap={{ scale: 0.97 }}
                 onClick={onShowVideo}
-                className="flex items-center gap-2 px-6 py-3 rounded-full bg-gradient-to-r from-violet-600 to-fuchsia-600 text-white font-display font-bold text-sm shadow-[0_0_20px_rgba(139,92,246,0.3)] hover:shadow-[0_0_30px_rgba(139,92,246,0.5)] transition-all"
+                className="flex items-center gap-2 px-6 py-3 bg-accent text-black font-sans font-bold text-sm uppercase tracking-widest hover:bg-white transition-colors"
               >
                 <Video size={16} />
                 Video Clip

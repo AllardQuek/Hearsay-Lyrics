@@ -1,60 +1,207 @@
 # Hearsay Lyrics
 
-**An AI-powered KTV companion that generates singable, phonetic English "misheard" lyrics for any Mandarin song.**
+AI-powered KTV companion that turns Mandarin lyrics into singable English hearsay lines, then stages them as a multimedia performance.
 
-Hearsay Lyrics syncs English phonetic approximations to the original audio and generates immersive background visuals — enabling non-Chinese speakers to seamlessly join karaoke sessions and bridging cultural gaps through music and laughter.
+## Current Status (March 2026)
 
----
+The app now supports an interleaved media pipeline:
 
-## Features
+- Text: line-by-line hearsay lyric generation
+- Image: per-line generated visuals streamed alongside lyric data
+- Video: generated short-form clip from top lyric moments
 
-- **Instant Phonetic Generation** — Paste in Mandarin lyrics and instantly get singable English approximations that match the sound and rhythm of the original, not just the meaning.
-- **Faithful ↔ Hilarious Slider** — Drag a slider live to shift the AI's output anywhere from strict phonetic accuracy to full comedic "misheard" chaos.
-- **AI Refine** — Pick any line, enter a prompt (e.g. "make this sound cooler"), and the AI rewrites it instantly.
-- **Alternative Cycles** — Hit the ↺ button to cycle through alternative AI-generated options for any line.
-- **Manual Editing** — Every line is directly editable in the UI. If you come up with something uniquely funny or poetic, just type it in. Nothing is locked in.
-- **Experimental AI Audio Sync** — Skip the LRC file entirely. Upload a raw MP3 and Gemini listens to the audio and figures out timestamps on its own, so the English highlights track the original Chinese vocals in real-time.
-- **AI Image Slideshow** — As soon as lyrics are generated, a background image slideshow is automatically created to match the emotional vibe of the song.
-- **AI Video Backdrop** — Go further and generate a cohesive AI video backdrop that reacts to the emotional arc of the lyrics, turning any opaque Chinese track into a full immersive KTV experience anyone can join.
+The main page keeps input + output visible in one flow, with output switching between:
 
----
+- Studio mode: editing, refining, variants, slideshow/video triggers
+- Presenter mode: synced playback controls and stage view
 
-## Why Hearsay Lyrics?
+## What Ships Today
 
-While there are thousands of literal translation apps and language learning tools, Hearsay Lyrics tackles a completely novel problem: **cross-language phonetic approximation**. We aren't translating *meaning* (which you can't sing) — we're translating *sound and rhythm* into English, which has never been packaged as a deliberate, interactive sing-along bridge.
+- Mandarin lyrics input (paste or demo catalog)
+- Per-line hearsay generation with pinyin + meaning
+- Inline editing, variants, refine actions
+- Audio input by URL or local upload
+- AI sync for lyric timestamps from uploaded audio
+- Director NDJSON streaming endpoint with progressive per-line updates
+- Generated image backdrop for each line when available
+- Image slideshow mode
+- Video clip generation flow (start + poll status)
+- Cache-first demo mode for reproducible runs (`love-confession`)
 
-Beyond KTV, the core technology has applications for international fans of M-Pop, K-Pop, and J-Pop, and offers a fun, low-friction entry point for language learners to engage with foreign media without needing to read native scripts first.
+## Interleaved Text + Image + Video Flow
 
----
+1. Studio sends lyrics to `POST /api/director`.
+2. Director returns NDJSON lines progressively, each containing lyric text fields and (when generated) image bytes.
+3. Presenter mode overlays active lyric text over generated visual backdrops.
+4. Optional slideshow uses per-line visual prompts/images.
+5. Optional video flow starts via `POST /api/video` and polls `POST /api/video/status` until a clip is ready.
 
-## Getting Started
+## Tech Stack
+
+- Next.js App Router (TypeScript)
+- React + Framer Motion
+- Tailwind CSS
+- Gemini models via `@google/genai`
+- Vertex AI auth flow for Veo long-running video operations
+
+## Prerequisites
+
+- Node.js 20+
+- pnpm 9+
+
+## Environment Variables
+
+Create `.env.local` in the repo root.
+
+Required for text/image/sync flows:
 
 ```bash
+VERTEX_AI_API_KEY=your_vertex_api_key
+```
+
+Required for video generation endpoints (`/api/video`, `/api/video/status`):
+
+```bash
+GCP_PROJECT_ID=your_gcp_project_id
+GCP_SERVICE_ACCOUNT_JSON={"type":"service_account",...}
+```
+
+Notes:
+
+- `GCP_SERVICE_ACCOUNT_JSON` must be valid JSON (single-line string in `.env.local`).
+- If video credentials are missing, text/image features can still run.
+
+## Run Locally
+
+```bash
+pnpm install
 pnpm dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Open http://localhost:3000
 
-## 🎙️ Audio Context (Ultra Mode) — WIP Roadmap
+## Reproducible Testing
 
-Currently, the "Add Audio Link" feature uses **Aural-First Prompt Engineering** to encourage Gemini to generate lyrics that match general singing cadences and common slurs in C-Pop.
+There is currently no dedicated unit/integration test runner in this repo. Use the reproducible smoke checks below.
 
-### Current Implementation (M1)
-- **Prompt Injection**: The system always includes an `AUDIO CONTEXT` instruction to the Gemini 3.1 Flash-Lite model.
-- **Goal**: Forces the model to prioritize singability and phonetics over literal translation.
+### 1) Baseline Build + Lint
 
-### Future Multimodal Integration (M2/M3)
-To achieve true audio-informed generation, the following steps are planned:
+```bash
+pnpm lint
+pnpm build
+```
 
-1.  **Audio Extraction**: Integrate `yt-dlp` or a similar library to extract audio streams from YouTube URLs.
-2.  **File Hosting**: Temporary storage (e.g., Google Cloud Storage or local `/tmp`) to hold the audio buffer.
-3.  **Gemini Multimodal API**: Use the **Google AI File Manager API** to upload audio files.
-4.  **Audio-to-Hearsay Pipeline**:
-    *   Send the `fileUri` along with the lyrics to **Gemini 1.5 Pro**.
-    *   Instruct the model to timestamp pauses, match vowel elongations, and identify specific singer slurs that differ from standard Pinyin.
-5.  **Synchronization**: Automated LRC (Lyric) timestamping using Gemini's ability to "hear" when words begin and end.
+Expected: both commands exit successfully.
 
-### Potential APIs
-- **Google Generative AI SDK**: For `model.generateContent([filePart, textPart])`.
-- **YouTube Data API**: To fetch metadata (title, artist) automatically.
-- **Punctuation & Rhythm Extraction**: Specialized audio analysis libraries (like `librosa` or `Essentia`) could assist in identifying beats per minute (BPM) to further refine syllable matching.
+### 2) Deterministic Cache-Backed Director Test (No Live Generation)
+
+This verifies the interleaved director output path deterministically using cached assets.
+
+```bash
+curl -sS \
+    -D /tmp/hearsay-headers.txt \
+    -o /tmp/hearsay-cache.ndjson \
+    -H "Content-Type: application/json" \
+    -X POST http://localhost:3000/api/director \
+    -d '{"text":"smoke","songId":"love-confession","cacheMode":"prefer-cache"}'
+
+grep -i "X-Hearsay-Cache" /tmp/hearsay-headers.txt
+wc -l /tmp/hearsay-cache.ndjson
+rg '"hearsay"|"imageBase64"' /tmp/hearsay-cache.ndjson | head
+```
+
+Expected:
+
+- Header includes `X-Hearsay-Cache: hit`
+- NDJSON has multiple lines
+- Output includes hearsay text fields and cached image payload fields
+
+### 3) Live Interleaved Text+Image Director Test
+
+This verifies real generation and progressive NDJSON content.
+
+```bash
+cat > /tmp/hearsay-live.json <<'JSON'
+{
+    "text": "塞納河畔 左岸的咖啡\n留下唇印的嘴\n告白氣球 風吹到對街",
+    "cacheMode": "bypass-cache",
+    "generateImages": true
+}
+JSON
+
+curl -sS \
+    -D /tmp/hearsay-live-headers.txt \
+    -o /tmp/hearsay-live.ndjson \
+    -H "Content-Type: application/json" \
+    -X POST http://localhost:3000/api/director \
+    --data-binary @/tmp/hearsay-live.json
+
+grep -i "X-Hearsay-Cache" /tmp/hearsay-live-headers.txt
+wc -l /tmp/hearsay-live.ndjson
+rg '"hearsay"' /tmp/hearsay-live.ndjson
+rg '"imageBase64"' /tmp/hearsay-live.ndjson
+```
+
+Expected:
+
+- Header includes `X-Hearsay-Cache: bypassed`
+- NDJSON contains generated line objects
+- At least some lines include `imageBase64` unless image quota/rate-limit is hit
+
+### 4) Video Generation API Test (Optional)
+
+Requires `GCP_PROJECT_ID` + `GCP_SERVICE_ACCOUNT_JSON`.
+
+Start operation:
+
+```bash
+curl -sS \
+    -H "Content-Type: application/json" \
+    -X POST http://localhost:3000/api/video \
+    -d '{
+        "lines": [
+            {
+                "chinese": "留下唇印的嘴",
+                "pinyin": "Liú xià chún yìn de zuǐ",
+                "meaning": "The mouth that left a lip print",
+                "candidates": [{"text":"Lose ya shorn in the sway","phonetic":0.85,"humor":0.8}]
+            }
+        ]
+    }'
+```
+
+Poll status using returned `operationName`:
+
+```bash
+curl -sS \
+    -H "Content-Type: application/json" \
+    -X POST http://localhost:3000/api/video/status \
+    -d '{"operationName":"<paste-operation-name-here>"}'
+```
+
+Expected when complete:
+
+- `done: true`
+- one of `videoBase64` or `videoUri`
+
+### 5) UI Repro Path
+
+1. Open app at http://localhost:3000.
+2. Select `告白氣球 (Love Confession)` from Hit Singles.
+3. Keep cache toggle ON.
+4. Click Direct Scene.
+5. Confirm output appears in Studio, then switch to Presenter.
+6. Press Play and verify lyric progression + background visuals.
+
+Expected:
+
+- Fast cache-backed run
+- Stable playback against `/audio/love-confession.mp3`
+- Interleaved lyric + visual experience in Presenter mode
+
+## Useful Docs
+
+- Product plan: `docs/plan.md`
+- PRD: `docs/PRD.md`
+- UI revamp notes: `docs/UI_REVAMP_PLAN.md`
+- Audio integration notes: `docs/audio-integration.md`

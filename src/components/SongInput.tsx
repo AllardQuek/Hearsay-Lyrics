@@ -1,26 +1,61 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useRef, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { Music, Sparkles, Upload, FileText, FileJson, X, Globe, Zap, Headphones, Loader2, PlayCircle, CheckCircle2 } from "lucide-react";
+import { Music, Upload, FileText, FileJson, Zap, Loader2, CheckCircle2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 import { EXAMPLE_SONGS } from "@/lib/catalog";
 import { parseLRC } from "@/lib/sync-utils";
+import { type HearsayLine } from "@/lib/gemini";
+import { isCacheableSongId, type CacheMode } from "@/lib/cache";
+
+type SyncLine = Partial<HearsayLine> & {
+  text?: string;
+  original?: string;
+};
+
+function getSyncLineText(line: SyncLine): string {
+  return line.chinese || line.original || line.text || "";
+}
+
+const LOADING_STAGES = [
+  "Scouting locations...",
+  "Casting voices...",
+  "Setting the stage...",
+  "Rehearsing lines...",
+  "Lights, camera, hearsay...",
+  "Assembling final cut...",
+];
 
 export default function SongInput({ 
   onGenerate, 
   loading 
 }: { 
-  onGenerate: (text: string, audioUrl?: string, preComputed?: any[], songId?: string) => void,
+  onGenerate: (text: string, audioUrl?: string, preComputed?: SyncLine[], songId?: string, cacheMode?: CacheMode) => void,
   loading: boolean
 }) {
   const [pastedText, setPastedText] = useState("");
   const [audioUrl, setAudioUrl] = useState("");
-  const [currentPreComputed, setCurrentPreComputed] = useState<any[] | undefined>(undefined);
+  const [currentPreComputed, setCurrentPreComputed] = useState<SyncLine[] | undefined>(undefined);
   const [selectedId, setSelectedId] = useState<string | undefined>(undefined);
+  const [processingMode, setProcessingMode] = useState<"line" | "full">("full");
+  const [preferCache, setPreferCache] = useState(true);
+  
+  const [loadingStageIdx, setLoadingStageIdx] = useState(0);
+
+  useEffect(() => {
+    if (!loading) {
+      setLoadingStageIdx(0);
+      return;
+    }
+    const interval = setInterval(() => {
+      setLoadingStageIdx((prev) => (prev + 1) % LOADING_STAGES.length);
+    }, 2000);
+    return () => clearInterval(interval);
+  }, [loading]);
   
   // Custom upload states
   const [customAudio, setCustomAudio] = useState<{name: string, url: string} | null>(null);
-  const [customLrc, setCustomLrc] = useState<{name: string, content: any[]} | null>(null);
+  const [customLrc, setCustomLrc] = useState<{name: string, content: SyncLine[]} | null>(null);
   const audioInputRef = useRef<HTMLInputElement>(null);
   const lrcInputRef = useRef<HTMLInputElement>(null);
 
@@ -29,13 +64,25 @@ export default function SongInput({
   const [syncStatus, setSyncStatus] = useState<'idle' | 'success' | 'error'>('idle');
 
   const handleGenerate = () => {
-    const effectiveText = customLrc ? customLrc.content.map(l => l.text).join('\n') : pastedText;
+    let effectiveText = customLrc ? customLrc.content.map(getSyncLineText).join('\n') : pastedText;
+    
+    // Quick testing: If "line" mode, only process the first non-empty line
+    if (processingMode === "line") {
+      const lines = effectiveText.split('\n').filter(l => l.trim().length > 0);
+      if (lines.length > 0) {
+        effectiveText = lines[0];
+      }
+    }
+
     const effectiveAudio = customAudio?.url || audioUrl;
     const effectiveSync = customLrc?.content || currentPreComputed;
     const effectiveId = (customAudio || customLrc) ? "custom-upload" : selectedId;
+    const effectiveCacheMode: CacheMode = isCacheableSongId(effectiveId)
+      ? (preferCache ? "prefer-cache" : "bypass-cache")
+      : "bypass-cache";
 
     if (effectiveText.trim() && !loading) {
-      onGenerate(effectiveText, effectiveAudio, effectiveSync, effectiveId);
+      onGenerate(effectiveText, effectiveAudio, effectiveSync, effectiveId, effectiveCacheMode);
     }
   };
 
@@ -45,7 +92,8 @@ export default function SongInput({
       const url = URL.createObjectURL(file);
       setCustomAudio({ name: file.name, url });
       setAudioUrl(""); 
-      setSelectedId(undefined); 
+      setSelectedId(undefined);
+      setPreferCache(false);
     }
   };
 
@@ -53,10 +101,15 @@ export default function SongInput({
     const file = e.target.files?.[0];
     if (file) {
       const text = await file.text();
-      const parsed = parseLRC(text);
+      const parsed: SyncLine[] = parseLRC(text).map((line) => ({
+        chinese: line.text,
+        text: line.text,
+        startTime: line.startTime,
+      }));
       setCustomLrc({ name: file.name, content: parsed });
-      setPastedText(parsed.map((l: any) => l.text).join('\n'));
+      setPastedText(parsed.map(getSyncLineText).join('\n'));
       setSelectedId(undefined); 
+      setPreferCache(false);
       setSyncStatus('idle'); // Reset sync status if manual file uploaded
     }
   };
@@ -85,7 +138,27 @@ export default function SongInput({
           });
 
           if (!response.ok) throw new Error("Sync failed");
-          const data = await response.json();
+          const rawData: unknown = await response.json();
+          if (!Array.isArray(rawData)) {
+            throw new Error("Invalid sync response");
+          }
+          const data: SyncLine[] = rawData.map((item) => {
+            if (!item || typeof item !== "object") {
+              return { chinese: "" };
+            }
+            const line = item as {
+              chinese?: string;
+              text?: string;
+              original?: string;
+              startTime?: number;
+            };
+            return {
+              chinese: line.chinese ?? line.text ?? line.original ?? "",
+              text: line.text,
+              original: line.original,
+              startTime: line.startTime,
+            };
+          });
           
           setCustomLrc({ name: "✨ AI Synced Timestamps", content: data });
           setSyncStatus('success');
@@ -110,272 +183,322 @@ export default function SongInput({
       setAudioUrl(example.audioUrl || "");
       setCurrentPreComputed(example.preComputedLines);
       setSelectedId(id);
+      setPreferCache(isCacheableSongId(id));
       setCustomAudio(null);
       setCustomLrc(null);
     }
   };
 
-  const LOADING_PHRASES = [
-    "Mixing Hearsay...",
-    "Vibe-checking syllables...",
-    "Finding the flow...",
-    "Rhyme-syncing...",
-    "Translating energy...",
-    "Polishing lyrics...",
-  ];
-
-  const [loadingPhraseIndex, setLoadingPhraseIndex] = useState(0);
-
-  useEffect(() => {
-    let interval: NodeJS.Timeout;
-    if (loading) {
-      interval = setInterval(() => {
-        setLoadingPhraseIndex((prev) => (prev + 1) % LOADING_PHRASES.length);
-      }, 2000);
-    }
-    return () => clearInterval(interval);
-  }, [loading, LOADING_PHRASES.length]);
+  const PRIMARY_ACTION_LABEL = "Direct Scene";
+  const isCacheControlEnabled = isCacheableSongId(selectedId);
 
   return (
-    <div className="w-full max-w-2xl mx-auto space-y-12">
-      {/* 1. Catalog Presets */}
-      <div className="space-y-4">
-        <label className="text-[10px] font-display font-black text-muted/30 uppercase tracking-[0.3em] px-1 flex items-center gap-2">
-          <Globe size={12} /> Fast Track
-        </label>
-        <div className="flex flex-wrap gap-3">
+    <div className="w-full space-y-14 py-4 lg:space-y-16">
+      {/* 1. Catalog Presets - Premium Style */}
+      <div className="grid grid-cols-1 gap-8 lg:grid-cols-12 lg:gap-10">
+        <div className="lg:col-span-3 space-y-3">
+          <div className="flex items-end gap-3">
+            <span className="text-4xl font-display font-medium text-white/10 leading-none select-none tracking-tight">01</span>
+            <label className="text-sm font-medium text-white/80 tracking-wide mb-1">
+              Hit Singles
+            </label>
+          </div>
+          <p className="text-xs font-light text-white/40 leading-relaxed pl-12">
+            Pick a fan favorite to instantly load up the lyrics and audio.
+          </p>
+        </div>
+        
+        <div className="lg:col-span-9 grid grid-cols-1 gap-4 sm:grid-cols-2">
           {EXAMPLE_SONGS.map((song) => (
             <button
               key={song.id}
               onClick={() => loadExample(song.id)}
               className={cn(
-                "glass px-5 py-2.5 rounded-full text-sm font-bold transition-all flex items-center gap-2 group",
+                "group relative overflow-hidden p-5 rounded-2xl border transition-all text-left glass shadow-sm",
                 selectedId === song.id 
-                  ? "bg-primary text-white border-primary shadow-[0_0_25px_rgba(var(--primary-rgb),0.4)]" 
-                  : "hover:border-white/30 text-muted hover:text-white hover:bg-white/5"
+                  ? "bg-primary/10 border-primary/50 text-white shadow-primary/20" 
+                  : "border-white/10 hover:border-white/30 text-white/60 hover:text-white bg-black/40 hover:bg-black/60"
               )}
             >
-              <Music size={14} className={cn("transition-colors", selectedId === song.id ? "text-white" : "text-muted group-hover:text-primary")} />
-              <span>{song.title}</span>
+              <div className="relative z-10 flex flex-col h-full gap-3">
+                <div className="flex items-center gap-3">
+                  <div className={cn(
+                    "p-2 rounded-full transition-colors",
+                    selectedId === song.id ? "bg-primary text-white" : "bg-white/5 text-white/40 group-hover:bg-white/10 group-hover:text-white"
+                  )}>
+                    <Music size={14} />
+                  </div>
+                  <span className="text-sm font-medium tracking-wide block truncate">{song.title}</span>
+                </div>
+              </div>
+              {selectedId === song.id && (
+                <motion.div 
+                  layoutId="catalog-glow"
+                  className="absolute inset-0 bg-primary/10 blur-xl group-hover:blur-2xl transition-all"
+                />
+              )}
             </button>
           ))}
         </div>
       </div>
 
-      <div className="space-y-8">
-        {/* 2. Primary Lyrics Input */}
-        <div className="space-y-4">
-          <label className="text-xs font-display font-bold text-muted flex items-center justify-between px-1">
-            <span className="flex items-center gap-2">
-              <Zap size={14} className="text-primary" /> 
-              Step 1: Paste Mandarin Lyrics
-            </span>
-            {customLrc && <span className="text-[10px] text-accent uppercase font-black bg-accent/10 px-2 py-0.5 rounded-full">Auto-filled from LRC</span>}
-          </label>
-          <div className="relative group">
+      <div className="space-y-10 lg:space-y-12">
+        {/* 2. Primary Lyrics Input - Cyber-Trad Typography */}
+        <div className="grid grid-cols-1 gap-8 lg:grid-cols-12 lg:gap-10">
+          <div className="lg:col-span-3 space-y-2">
+            <div className="flex items-end gap-3">
+              <span className="text-4xl font-display font-medium text-white/10 leading-none select-none tracking-tight">02</span>
+              <label className="text-sm font-medium text-white/80 tracking-wide mb-1">
+                Mandarin Core
+              </label>
+            </div>
+            
+            <div className="pl-12 space-y-3">
+              <p className="text-xs font-light text-white/40 leading-relaxed">
+                Raw linguistic data. Characters or Pinyin accepted.
+              </p>
+              
+              <div className="flex bg-black/40 p-1 rounded-full border border-white/10 w-fit glass shadow-sm">
+                <button 
+                  onClick={() => setProcessingMode("full")}
+                  className={cn(
+                    "px-4 py-1.5 rounded-full text-xs font-medium transition-all",
+                    processingMode === "full" ? "bg-primary text-white shadow-sm" : "text-white/50 hover:text-white hover:bg-white/5"
+                  )}
+                >
+                  Full Song
+                </button>
+                <button 
+                  onClick={() => setProcessingMode("line")}
+                  className={cn(
+                    "px-4 py-1.5 rounded-full text-xs font-medium transition-all",
+                    processingMode === "line" ? "bg-primary/20 text-primary shadow-sm" : "text-white/50 hover:text-white hover:bg-white/5"
+                  )}
+                >
+                  Single Line
+                </button>
+              </div>
+            </div>
+            
+            {customLrc && (
+              <div className="pl-12 pt-2">
+                <span className="text-[10px] text-primary font-mono border border-primary/20 px-3 py-1 bg-primary/5 rounded-full block w-fit">
+                  LRC_SYNC_ACTIVE
+                </span>
+              </div>
+            )}
+          </div>
+
+          <div className="lg:col-span-9 relative group">
             <textarea
               value={pastedText}
               onChange={(e) => setPastedText(e.target.value)}
-              placeholder="Paste Chinese characters, pinyin, or mixed text here..."
+              placeholder="Paste Chinese lyrics here..."
               className={cn(
-                "w-full h-48 glass rounded-[2rem] p-8 focus:ring-2 outline-none transition-all resize-none text-lg leading-relaxed shadow-inner",
-                (customLrc || selectedId) ? "border-white/20" : "focus:ring-primary/40 hover:border-white/20"
+                "w-full h-72 sm:h-80 bg-black/40 border border-white/10 p-6 sm:p-8 outline-none transition-all resize-none text-lg rounded-2xl glass shadow-inner font-sans placeholder:text-white/20 whitespace-pre-wrap leading-relaxed",
+                (customLrc || selectedId) ? "border-primary/50 shadow-[inset_0_0_20px_rgba(244,63,94,0.05)]" : "hover:border-primary/30 focus:border-primary/50"
               )}
             />
-            <div className="absolute bottom-6 right-8 text-muted/10 group-hover:text-primary/20 transition-colors">
-              <FileText size={32} />
+            
+            <div className="absolute top-8 right-8 text-white/5 opacity-40 group-hover:opacity-100 transition-opacity pointer-events-none">
+              <FileText size={48} strokeWidth={1} />
             </div>
           </div>
         </div>
 
-        {/* 3. Optional Karaoke Enhancement */}
-        <div className="space-y-6 pt-4">
-          <div className="flex items-center gap-3 px-1">
-            <div className="h-[1px] flex-1 bg-gradient-to-r from-transparent to-white/10" />
-            <label className="text-[10px] font-display font-black text-muted uppercase tracking-[0.25em] flex items-center gap-2 whitespace-nowrap">
-              <Headphones size={12} className="text-accent" /> Optional: Karaoke Power-Ups
-            </label>
-            <div className="h-[1px] flex-1 bg-gradient-to-l from-transparent to-white/10" />
+        {/* 3. Multimedia Uplink - Premium Style */}
+        <div className="grid grid-cols-1 gap-8 lg:grid-cols-12 lg:gap-10">
+          <div className="lg:col-span-3 space-y-3">
+            <div className="flex items-end gap-3">
+              <span className="text-4xl font-display font-medium text-white/10 leading-none select-none tracking-tight">03</span>
+              <label className="text-sm font-medium text-white/80 tracking-wide mb-1">
+                Media & Sync
+              </label>
+            </div>
+            <p className="text-xs font-light text-white/40 leading-relaxed pl-12">
+              Connect auditory payloads and temporal markers.
+            </p>
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
-            {/* Audio Block */}
-            <div 
+          <div className="lg:col-span-9 grid grid-cols-1 gap-6 md:grid-cols-2 md:gap-8">
+            <div className="space-y-4">
+              <label className="text-xs font-medium text-white/60 block">Backing Track</label>
+              <div className="space-y-3">
+                <input
+                  type="text"
+                  value={audioUrl}
+                  onChange={(e) => {
+                    setAudioUrl(e.target.value);
+                    setCustomAudio(null);
+                    setSelectedId(undefined);
+                  }}
+                  placeholder="Paste URL..."
+                  className={cn(
+                    "w-full bg-black/40 px-5 py-4 text-sm border border-white/10 focus:border-primary/50 outline-none rounded-2xl transition-all shadow-inner placeholder:text-white/20",
+                    (selectedId && audioUrl) && "border-primary/40 text-primary shadow-[inset_0_0_20px_rgba(244,63,94,0.05)]"
+                  )}
+                />
+                
+                <button 
+                  onClick={() => audioInputRef.current?.click()}
+                  className={cn(
+                    "w-full py-4 border border-dashed rounded-2xl transition-all flex items-center justify-center gap-3 group bg-black/20",
+                    (customAudio || (selectedId && audioUrl))
+                      ? "border-primary/40 bg-primary/5 text-primary shadow-sm" 
+                      : "border-white/10 hover:border-white/30 text-white/60 hover:text-white"
+                  )}
+                >
+                  {(customAudio || (selectedId && audioUrl)) ? <CheckCircle2 size={18} /> : <Upload size={18} className="group-hover:-translate-y-1 transition-transform" />}
+                  <span className="text-sm font-medium">
+                    {customAudio ? customAudio.name : (selectedId && audioUrl) ? "Demo Audio Attached" : "Upload Local File"}
+                  </span>
+                  <input ref={audioInputRef} type="file" accept="audio/*" onChange={handleAudioUpload} className="hidden" />
+                </button>
+              </div>
+            </div>
+
+            <div className="space-y-4">
+              <label className="text-xs font-medium text-white/60 block">Lyric Timing (LRC)</label>
+              <div className="grid grid-cols-2 gap-3 h-[116px]">
+                <button
+                  onClick={handleAiSync}
+                  disabled={isSyncing || !pastedText.trim() || !(customAudio?.url || audioUrl)}
+                  className={cn(
+                    "h-full bg-black/40 border border-white/10 hover:border-white/30 hover:bg-black/60 rounded-2xl flex flex-col items-center justify-center gap-3 transition-all overflow-hidden relative group shadow-sm",
+                    (syncStatus === 'success' || (selectedId && currentPreComputed)) && "border-primary/50 text-white bg-primary/10 shadow-[inner_0_0_20px_rgba(244,63,94,0.1)]",
+                    (isSyncing || !pastedText.trim() || !(customAudio?.url || audioUrl)) && "opacity-50 pointer-events-none"
+                  )}
+                >
+                  <div className={cn(
+                    "p-3 rounded-full mb-1 transition-colors",
+                    (syncStatus === 'success' || (selectedId && currentPreComputed)) ? "bg-primary text-white" : "bg-white/5 text-white/60 group-hover:bg-white/10 group-hover:text-white"
+                  )}>
+                    {isSyncing ? <Loader2 size={20} className="animate-spin" /> : 
+                    (syncStatus === 'success' || (selectedId && currentPreComputed)) ? <CheckCircle2 size={20} /> : <Zap size={20} className="group-hover:scale-110 transition-transform" />}
+                  </div>
+                  <span className="text-xs font-medium text-center">
+                    {(selectedId && currentPreComputed) ? "Demo Sync" : syncStatus === 'success' ? "AI Sync Done" : "AI Sync"}
+                  </span>
+                  {syncStatus === 'success' && <div className="absolute top-0 right-0 w-12 h-12 bg-primary/20 blur-xl" />}
+                </button>
+                
+                <button
+                  onClick={() => lrcInputRef.current?.click()}
+                  className={cn(
+                    "h-full bg-black/40 border border-white/10 hover:border-white/30 hover:bg-black/60 rounded-2xl flex flex-col items-center justify-center gap-3 transition-all group shadow-sm",
+                    customLrc && "border-primary/50 text-white bg-primary/10"
+                  )}
+                >
+                   <div className={cn(
+                    "p-3 rounded-full mb-1 transition-colors",
+                    customLrc ? "bg-primary text-white" : "bg-white/5 text-white/60 group-hover:bg-white/10 group-hover:text-white"
+                  )}>
+                    {customLrc ? <CheckCircle2 size={20} /> : <FileJson size={20} className="group-hover:scale-110 transition-transform" />}
+                  </div>
+                  <span className="text-xs font-medium text-center">{customLrc ? "LRC Uploaded" : "Manual LRC"}</span>
+                  <input ref={lrcInputRef} type="file" accept=".lrc" onChange={handleLrcUpload} className="hidden" />
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* Generate Button - Stage Trigger Style */}
+        <div className="pt-12 flex flex-col items-center">
+          <div className="mb-4 w-full max-w-[460px]">
+            <div
               className={cn(
-                "p-6 rounded-[1.5rem] border-2 border-dashed transition-all flex flex-col items-center justify-center gap-3 bg-white/5 relative overflow-hidden group min-h-[160px]",
-                customAudio || (audioUrl && selectedId) ? "border-primary bg-primary/5" : "border-white/10 hover:border-white/20 hover:bg-white/[0.07]"
+                "flex items-center justify-between gap-3 rounded-xl border px-4 py-3",
+                isCacheControlEnabled ? "border-white/15 bg-white/[0.03]" : "border-white/10 bg-transparent"
               )}
             >
-              <input type="file" ref={audioInputRef} onChange={handleAudioUpload} accept="audio/*" className="hidden" />
-              
-              {(customAudio || (audioUrl && selectedId)) ? (
-                <div className="text-center w-full px-2 relative z-10">
-                  <div className="w-12 h-12 rounded-full bg-primary/20 flex items-center justify-center text-primary mx-auto mb-3 shadow-lg">
-                    <Music size={24} />
+              <div className="min-w-0">
+                <p className={cn("text-sm font-medium", isCacheControlEnabled ? "text-white" : "text-white/45")}>Use cache</p>
+                <p className={cn("text-[11px]", isCacheControlEnabled ? "text-white/55" : "text-white/35")}>
+                  {isCacheControlEnabled
+                    ? "On: cache-first. Off: always regenerate fresh."
+                    : "Available for cacheable demo songs."}
+                </p>
+              </div>
+              <button
+                onClick={() => setPreferCache((prev) => !prev)}
+                disabled={!isCacheControlEnabled}
+                className={cn(
+                  "relative inline-flex h-7 w-12 shrink-0 items-center rounded-full border transition-all disabled:cursor-not-allowed disabled:opacity-50",
+                  preferCache
+                    ? "border-primary/50 bg-primary/30"
+                    : "border-white/20 bg-white/10"
+                )}
+                aria-label="Toggle cache preference"
+              >
+                <span
+                  className={cn(
+                    "inline-block h-5 w-5 transform rounded-full bg-white shadow transition-transform",
+                    preferCache ? "translate-x-6" : "translate-x-1"
+                  )}
+                />
+              </button>
+            </div>
+          </div>
+
+          <button
+            onClick={handleGenerate}
+            disabled={loading || !pastedText.trim()}
+            className={cn(
+              "group relative isolate w-full max-w-[400px] h-[72px] overflow-hidden rounded-2xl transition-all duration-500",
+              loading 
+                ? "bg-zinc-900 border border-white/5 cursor-wait" 
+                : "bg-primary hover:brightness-110 active:scale-[0.98] cursor-pointer shadow-[0_20px_50px_-15px_rgba(244,63,94,0.5)] hover:shadow-[0_25px_60px_-10px_rgba(244,63,94,0.7)]"
+            )}
+            aria-label="Direct hearsay media"
+          >
+            {/* Glossy Overlay for "Pop" */}
+            <div className="absolute inset-0 z-0 bg-gradient-to-b from-white/20 to-transparent pointer-events-none" />
+            
+            {/* Animated Highlight Sweep */}
+            <div className="absolute inset-0 z-0 bg-gradient-to-r from-transparent via-white/30 to-transparent -translate-x-full group-hover:animate-[shimmer_2s_infinite] pointer-events-none" />
+            
+            <div className="relative z-10 flex items-center justify-center gap-4 px-8">
+              {loading ? (
+                <div className="flex items-center gap-4 w-full justify-center">
+                  <div className="relative flex items-center justify-center">
+                    <Loader2 size={24} className="animate-spin text-white opacity-80" />
+                    <div className="absolute inset-0 bg-white/20 blur-md rounded-full animate-pulse" />
                   </div>
-                  <p className="text-sm font-bold text-white truncate w-full px-2">
-                    {customAudio ? customAudio.name : "Catalog Audio Loaded"}
-                  </p>
-                  <button 
-                    onClick={() => { setCustomAudio(null); setAudioUrl(""); setSelectedId(undefined); }}
-                    className="mt-3 text-[10px] font-black text-white/40 hover:text-red-400 uppercase tracking-widest transition-colors flex items-center gap-1 mx-auto"
-                  >
-                    <X size={10} /> Replace Audio
-                  </button>
+                  <div className="h-6 overflow-hidden relative w-48">
+                    <AnimatePresence mode="wait">
+                      <motion.span 
+                        key={loadingStageIdx}
+                        initial={{ y: 20, opacity: 0 }}
+                        animate={{ y: 0, opacity: 1 }}
+                        exit={{ y: -20, opacity: 0 }}
+                        transition={{ duration: 0.5, ease: "circOut" }}
+                        className="absolute inset-0 font-display text-base font-bold tracking-wide uppercase text-white/90 whitespace-nowrap"
+                      >
+                        {LOADING_STAGES[loadingStageIdx]}
+                      </motion.span>
+                    </AnimatePresence>
+                  </div>
                 </div>
               ) : (
-                <div className="text-center group-hover:scale-105 transition-transform cursor-pointer" onClick={() => audioInputRef.current?.click()}>
-                  <div className="w-12 h-12 rounded-full bg-white/5 flex items-center justify-center text-muted group-hover:bg-primary/20 group-hover:text-primary transition-all mx-auto mb-3">
-                    <Upload size={20} />
+                <>
+                  <div className="relative flex items-center justify-center">
+                    <Zap size={26} className="text-white fill-white drop-shadow-[0_2px_8px_rgba(255,255,255,0.4)] transition-all duration-500 group-hover:scale-110 group-hover:rotate-12" />
                   </div>
-                  <p className="text-xs font-bold text-white uppercase tracking-wider">Sync MP3 / WAV</p>
-                  <p className="text-[9px] text-muted font-medium mt-1">Unlock audio analysis</p>
-                </div>
+                  <span className="font-display text-2xl font-black tracking-tighter uppercase italic text-white antialiased drop-shadow-[0_2px_10px_rgba(0,0,0,0.2)]">
+                    {PRIMARY_ACTION_LABEL}
+                  </span>
+                </>
               )}
             </div>
+          </button>
 
-            {/* LRC / Sync Block */}
-            {(() => {
-              const hasAudio = !!(customAudio || audioUrl);
-              const hasSyncData = !!(customLrc || (currentPreComputed && selectedId));
-
-              return (
-                <div
-                  className={cn(
-                    "rounded-[1.5rem] border-2 border-dashed transition-all bg-white/5 relative overflow-hidden",
-                    !hasAudio && "opacity-40 cursor-not-allowed",
-                    hasSyncData ? "border-accent bg-accent/5" : hasAudio ? "border-white/20" : "border-white/10"
-                  )}
-                  title={!hasAudio ? "Upload an audio file first to enable timing sync" : undefined}
-                >
-                  <input type="file" ref={lrcInputRef} onChange={handleLrcUpload} accept=".lrc" className="hidden" disabled={!hasAudio} />
-
-                  {hasSyncData ? (
-                    /* Sync data loaded state */
-                    <div className="p-6 flex flex-col items-center justify-center gap-3 min-h-[160px]">
-                      <div className="text-center w-full px-2 relative z-10">
-                        <div className="w-12 h-12 rounded-full bg-accent/20 flex items-center justify-center text-accent mx-auto mb-3 shadow-lg">
-                          <FileJson size={24} />
-                        </div>
-                        <p className="text-sm font-bold text-white truncate w-full px-2">
-                          {customLrc ? customLrc.name : "Timing Data Loaded"}
-                        </p>
-                        <button
-                          onClick={() => { setCustomLrc(null); setCurrentPreComputed(undefined); setSelectedId(undefined); setSyncStatus('idle'); }}
-                          className="mt-3 text-[10px] font-black text-white/40 hover:text-red-400 uppercase tracking-widest transition-colors flex items-center gap-1 mx-auto"
-                        >
-                          <X size={10} /> Replace Timing
-                        </button>
-                      </div>
-                    </div>
-                  ) : (
-                    /* Two-option layout: Upload LRC | Magic AI Sync */
-                    <div className="grid grid-cols-2 divide-x divide-white/10 min-h-[160px]">
-                      {/* Option A: Upload LRC */}
-                      <button
-                        onClick={() => hasAudio && lrcInputRef.current?.click()}
-                        disabled={!hasAudio}
-                        className={cn(
-                          "p-5 flex flex-col items-center justify-center gap-3 transition-all group/lrc",
-                          hasAudio ? "hover:bg-white/5 cursor-pointer" : "cursor-not-allowed"
-                        )}
-                      >
-                        <div className={cn(
-                          "w-10 h-10 rounded-full flex items-center justify-center transition-all",
-                          hasAudio ? "bg-white/5 text-muted group-hover/lrc:bg-accent/20 group-hover/lrc:text-accent" : "bg-white/5 text-muted/30"
-                        )}>
-                          <Upload size={18} />
-                        </div>
-                        <div>
-                          <p className="text-[10px] font-black text-white uppercase tracking-wider">Upload .LRC</p>
-                          <p className="text-[9px] text-muted font-medium mt-0.5 italic">Precise timestamps</p>
-                        </div>
-                      </button>
-
-                      {/* Option B: AI Magic Sync */}
-                      <button
-                        onClick={handleAiSync}
-                        disabled={!hasAudio || isSyncing || !pastedText.trim()}
-                        className={cn(
-                          "p-5 flex flex-col items-center justify-center gap-3 transition-all group/ai",
-                          hasAudio ? "cursor-pointer" : "cursor-not-allowed",
-                          syncStatus === 'error' && "bg-red-500/5",
-                          hasAudio && syncStatus !== 'error' && "hover:bg-accent/5"
-                        )}
-                      >
-                        <div className={cn(
-                          "w-10 h-10 rounded-full flex items-center justify-center transition-all",
-                          !hasAudio ? "bg-white/5 text-muted/30" :
-                          syncStatus === 'error' ? "bg-red-500/20 text-red-400" :
-                          "bg-accent/10 text-accent group-hover/ai:bg-accent/20"
-                        )}>
-                          {isSyncing ? <Loader2 size={18} className="animate-spin" /> : <Sparkles size={18} />}
-                        </div>
-                        <div>
-                          <p className={cn(
-                            "text-[10px] font-black uppercase tracking-wider",
-                            !hasAudio ? "text-white/30" : syncStatus === 'error' ? "text-red-400" : "text-white"
-                          )}>
-                            {isSyncing ? "Syncing..." : syncStatus === 'error' ? "Retry Sync" : "Magic AI Sync"}
-                          </p>
-                          <p className="text-[9px] text-muted font-medium mt-0.5 italic">
-                            {isSyncing ? "Gemini is listening..." : "Powered by Gemini 3.1"}
-                          </p>
-                        </div>
-                      </button>
-                    </div>
-                  )}
-
-                  {/* Disabled overlay hint */}
-                  {!hasAudio && (
-                    <div className="absolute bottom-2 inset-x-0 flex justify-center">
-                      <p className="text-[8px] text-muted/40 uppercase tracking-widest font-bold">Upload audio first</p>
-                    </div>
-                  )}
-                </div>
-              );
-            })()}
-          </div>
+          {!pastedText.trim() && !loading && (
+            <p className="mt-4 text-[10px] uppercase tracking-[0.2em] text-white/20 font-medium">
+              Awaiting script input
+            </p>
+          )}
         </div>
-
-        <button
-          onClick={handleGenerate}
-          disabled={!pastedText.trim() || loading}
-          className={cn(
-            "w-full py-5 rounded-full font-display font-bold text-xl shadow-premium transition-standard flex items-center justify-center gap-3 group min-h-[76px] relative overflow-hidden",
-            "bg-primary hover:bg-primary-hover active:scale-[0.98] border-t border-white/20",
-            "disabled:bg-muted/10 disabled:text-muted disabled:shadow-none disabled:active:scale-100 disabled:border-transparent"
-          )}
-        >
-          {loading ? (
-            <div className="flex items-center gap-3">
-              <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-              <AnimatePresence mode="wait">
-                <motion.span
-                  key={loadingPhraseIndex}
-                  initial={{ opacity: 0, y: 5 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  exit={{ opacity: 0, y: -5 }}
-                >
-                  {LOADING_PHRASES[loadingPhraseIndex]}
-                </motion.span>
-              </AnimatePresence>
-            </div>
-          ) : (
-            <>
-              <span className="relative z-10 uppercase tracking-[0.1em]">Generate Hearsay Magic</span>
-              <Sparkles size={22} className="group-hover:rotate-12 transition-standard relative z-10 text-white" />
-              {pastedText.trim() && !loading && (
-                <motion.div 
-                  initial={{ opacity: 0 }}
-                  animate={{ opacity: [0, 0.15, 0] }}
-                  transition={{ repeat: Infinity, duration: 2 }}
-                  className="absolute inset-0 bg-white"
-                />
-              )}
-            </>
-          )}
-        </button>
       </div>
     </div>
   );

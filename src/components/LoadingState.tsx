@@ -1,99 +1,115 @@
 "use client";
 
-import { useState, useEffect } from "react";
-import { motion, AnimatePresence } from "framer-motion";
-import { Sparkles, Music, Mic2, Wand2 } from "lucide-react";
+import { motion } from "framer-motion";
+import { Zap, Sparkles, Orbit, Cpu } from "lucide-react";
+import { cn } from "@/lib/utils";
 
-const STATUS_MESSAGES = [
-  { text: "Tuning the audio spectrum...", icon: Music },
-  { text: "Parsing phonetics & cadences...", icon: Mic2 },
-  { text: "Applying humor layers...", icon: Sparkles },
-  { text: "Syncing the hearsay magic...", icon: Wand2 },
-  { text: "Finalizing your sing-along sheet...", icon: Sparkles },
-];
+interface LoadingStateProps {
+  phase?: "lyric-sync" | "conceptualizing" | "rendering" | "default";
+  progress?: number;
+  className?: string;
+}
 
-export default function LoadingState() {
-  const [statusIndex, setStatusIndex] = useState(0);
+const PHASES = {
+  "lyric-sync": {
+    label: "Synchronizing Linguistic Anchors",
+    icon: Sparkles,
+    detail: "Calibrating phonetic timings across the spectrum..."
+  },
+  "conceptualizing": {
+    label: "Neural Ideation Mapping",
+    icon: Orbit,
+    detail: "Synthesizing visual metaphors and semiotic clusters..."
+  },
+  "rendering": {
+    label: "Chromatic Synthesis",
+    icon: Cpu,
+    detail: "Assembling aesthetic output from latent vectors..."
+  },
+  "default": {
+    label: "Cueing The Studio",
+    icon: Zap,
+    detail: "Warming up your lyrics and beat alignment..."
+  }
+};
 
-  useEffect(() => {
-    const interval = setInterval(() => {
-      setStatusIndex((prev) => (prev + 1) % STATUS_MESSAGES.length);
-    }, 2000);
-    return () => clearInterval(interval);
-  }, []);
-
-  const CurrentIcon = STATUS_MESSAGES[statusIndex].icon;
+export default function LoadingState({ phase = "default", progress = 0, className }: LoadingStateProps) {
+  const { label, icon: Icon, detail } = PHASES[phase] || PHASES.default;
 
   return (
-    <div className="w-full py-20 flex flex-col items-center justify-center space-y-12">
-      {/* Central Animation */}
-      <div className="relative">
-        <motion.div
-          animate={{
-            scale: [1, 1.1, 1],
-            rotate: [0, 5, -5, 0],
-          }}
-          transition={{
-            duration: 4,
-            repeat: Infinity,
-            ease: "easeInOut",
-          }}
-          className="w-24 h-24 bg-primary/20 rounded-3xl flex items-center justify-center relative z-10 overflow-hidden"
-        >
-          <div className="absolute inset-0 bg-gradient-to-br from-primary/40 to-accent/40 animate-pulse" />
-          <CurrentIcon size={40} className="text-white relative z-20" />
-        </motion.div>
-        
-        {/* Orbiting Particles */}
-        {[...Array(3)].map((_, i) => (
-          <motion.div
-            key={i}
-            animate={{
-              rotate: 360,
-            }}
-            transition={{
-              duration: 3 + i,
-              repeat: Infinity,
-              ease: "linear",
-            }}
-            className="absolute inset-0 -m-4"
-          >
-            <div 
-              className="w-3 h-3 bg-primary rounded-full absolute top-0 left-1/2 -translate-x-1/2 blur-[2px]" 
-              style={{ opacity: 0.5 - (i * 0.1) }}
-            />
-          </motion.div>
-        ))}
+    <div className={cn("w-full py-32 flex flex-col items-center justify-center space-y-12", className)}>
+      {/* 1. Large Centerpiece Spinner (Cyber Jade) */}
+      <div className="relative w-32 h-32 flex items-center justify-center">
+        {/* Outer Orbit */}
+        <motion.div 
+           className="absolute inset-0 rounded-full border-[3px] border-primary/20"
+           animate={{ rotate: 360 }}
+           transition={{ duration: 10, repeat: Infinity, ease: "linear" }}
+        />
+        {/* Busy Orbit */}
+        <motion.div 
+           className="absolute inset-0 rounded-full border-t-[3px] border-primary blur-[1px]"
+           animate={{ rotate: -360 }}
+           transition={{ duration: 2, repeat: Infinity, ease: "easeInOut" }}
+        />
+        {/* Icon Core */}
+        <div className="relative z-10 p-6 bg-black/60 backdrop-blur-sm rounded-full border border-primary/40 shadow-[0_0_30px_rgba(244,63,94,0.3)]">
+           <Icon size={40} className="text-primary animate-pulse drop-shadow-md" />
+        </div>
       </div>
 
-      {/* Status Text */}
-      <div className="text-center space-y-2">
-        <AnimatePresence mode="wait">
-          <motion.p
-            key={statusIndex}
-            initial={{ opacity: 0, y: 10 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: -10 }}
-            className="text-2xl font-display font-bold text-primary"
+      {/* 2. Textual Status with Brutalist Typography */}
+      <div className="text-center space-y-4 max-w-md">
+        <div className="space-y-1">
+          <motion.h3 
+            initial={{ y: 20, opacity: 0 }}
+            animate={{ y: 0, opacity: 1 }}
+            className="text-2xl font-semibold tracking-wide text-white"
           >
-            {STATUS_MESSAGES[statusIndex].text}
+            {label}
+          </motion.h3>
+          <motion.p 
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            transition={{ delay: 0.2 }}
+            className="text-xs font-semibold text-primary/80 uppercase tracking-widest"
+          >
+            Director Live
           </motion.p>
-        </AnimatePresence>
-        <p className="text-muted text-sm uppercase tracking-widest font-bold opacity-50">
-          Gemini 3.1 is listening...
+        </div>
+        
+        <p className="text-sm text-white/50 leading-relaxed font-medium px-8">
+          {detail}
         </p>
       </div>
 
-      {/* Skeleton Lyrics */}
-      <div className="w-full max-w-xl space-y-6 opacity-20">
-        {[...Array(3)].map((_, i) => (
-          <div key={i} className="space-y-3">
-            <div className="h-4 w-1/3 bg-white/20 rounded-full animate-pulse" />
-            <div className="h-10 w-full bg-white/10 rounded-2xl animate-pulse" style={{ animationDelay: `${i * 0.2}s` }} />
-            <div className="h-4 w-1/4 bg-white/10 rounded-full animate-pulse" />
+      {/* 3. Futuristic Progress Gauge */}
+      {progress > 0 && (
+        <div className="w-full max-w-xs space-y-3 p-5 rounded-3xl border border-white/10 bg-black/40 backdrop-blur-md shadow-2xl">
+          <div className="flex justify-between items-end mb-1">
+             <span className="text-[10px] font-bold text-white/40 uppercase tracking-widest">Transmission Integrity</span>
+             <span className="text-sm font-semibold text-primary drop-shadow-md">{Math.round(progress)}%</span>
           </div>
-        ))}
-      </div>
+          <div className="h-2 w-full bg-black/50 rounded-full shadow-inner relative overflow-hidden flex border border-white/5">
+            <motion.div 
+               className="h-full bg-gradient-to-r from-primary to-accent rounded-full"
+               initial={{ width: 0 }}
+               animate={{ width: `${progress}%` }}
+               transition={{ duration: 0.5 }}
+            />
+            {/* Moving Scanning Light */}
+            <motion.div 
+               className="absolute top-0 bottom-0 w-8 bg-white/20 blur-sm"
+               animate={{ left: ["-20%", "120%"] }}
+               transition={{ duration: 2, repeat: Infinity, ease: "linear" }}
+            />
+          </div>
+        </div>
+      )}
+
+      {/* 4. Peripheral Scanlines (Local to component) */}
+      <div className="absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-primary/30 to-transparent" />
+      <div className="absolute inset-x-0 bottom-0 h-px bg-gradient-to-r from-transparent via-primary/30 to-transparent" />
     </div>
   );
 }

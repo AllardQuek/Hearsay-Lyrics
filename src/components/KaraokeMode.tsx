@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef, useEffect, forwardRef, useImperativeHandle } from "react";
+import { useState, useRef, useEffect, useCallback, forwardRef, useImperativeHandle } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   Play,
@@ -10,11 +10,8 @@ import {
   VolumeX,
   Maximize2,
   Minimize2,
-  Film,
   Image as ImageIcon,
   X,
-  ChevronLeft,
-  ChevronRight,
 } from "lucide-react";
 import { HearsayLine } from "@/lib/gemini";
 import { DirectorLine } from "@/app/api/director/route";
@@ -40,7 +37,6 @@ const KaraokeMode = forwardRef<KaraokeModeRef, KaraokeModeProps>(
     const [isMuted, setIsMuted] = useState(false);
     const [isFullscreen, setIsFullscreen] = useState(false);
     const [showBackdrop, setShowBackdrop] = useState(true);
-    const [currentImageIndex, setCurrentImageIndex] = useState(0);
 
     const audioRef = useRef<HTMLAudioElement>(null);
     const containerRef = useRef<HTMLDivElement>(null);
@@ -65,24 +61,16 @@ const KaraokeMode = forwardRef<KaraokeModeRef, KaraokeModeProps>(
     // Get corresponding director line for backdrop
     const directorLine = directorLines?.find((d) => d.chinese === activeLine?.chinese);
 
-    // Update image index when active line changes
-    useEffect(() => {
-      if (directorLines && activeLine) {
-        const idx = directorLines.findIndex((d) => d.chinese === activeLine.chinese);
-        if (idx !== -1) setCurrentImageIndex(idx);
-      }
-    }, [activeIndex, activeLine, directorLines]);
-
-    const togglePlay = () => {
+    const togglePlay = useCallback(() => {
       if (audioRef.current) {
         if (isPlaying) {
           audioRef.current.pause();
         } else {
           audioRef.current.play();
         }
-        setIsPlaying(!isPlaying);
+        setIsPlaying((prev) => !prev);
       }
-    };
+    }, [isPlaying]);
 
     const handleTimeUpdate = () => {
       if (audioRef.current) {
@@ -138,7 +126,7 @@ const KaraokeMode = forwardRef<KaraokeModeRef, KaraokeModeProps>(
       };
       window.addEventListener("keydown", handleKeyDown);
       return () => window.removeEventListener("keydown", handleKeyDown);
-    }, [isPlaying, currentTime, duration, onClose]);
+    }, [currentTime, duration, onClose, togglePlay]);
 
     const formatTime = (time: number) => {
       const mins = Math.floor(time / 60);
@@ -172,17 +160,18 @@ const KaraokeMode = forwardRef<KaraokeModeRef, KaraokeModeProps>(
               <motion.div
                 initial={{ opacity: 0 }}
                 animate={{ opacity: 1 }}
-                className="w-full h-full bg-gradient-to-br from-primary/20 via-black to-accent/20"
+                className="w-full h-full bg-black flex items-center justify-center opacity-30"
+                style={{ backgroundImage: 'radial-gradient(circle, rgba(255,255,255,0.1) 1px, transparent 1px)', backgroundSize: '24px 24px' }}
               />
             )}
           </AnimatePresence>
-          <div className="absolute inset-0 bg-gradient-to-t from-black via-black/60 to-black/30" />
+          <div className="absolute inset-x-0 bottom-0 h-1/2 bg-gradient-to-t from-black to-transparent" />
         </div>
 
         {/* Close Button */}
         <button
           onClick={onClose}
-          className="absolute top-6 right-6 z-50 p-3 rounded-full glass border border-white/10 text-white/70 hover:text-white hover:bg-white/10 transition-all"
+          className="absolute top-6 right-6 z-50 p-3 bg-black/40 backdrop-blur-md rounded-full border border-white/10 text-white/70 hover:text-white hover:bg-white/10 transition-all shadow-lg"
         >
           <X size={24} />
         </button>
@@ -192,16 +181,16 @@ const KaraokeMode = forwardRef<KaraokeModeRef, KaraokeModeProps>(
           <button
             onClick={() => setShowBackdrop(!showBackdrop)}
             className={cn(
-              "flex items-center gap-2 px-4 py-2 rounded-full glass border transition-all",
-              showBackdrop ? "border-accent text-accent" : "border-white/10 text-white/50"
+              "flex items-center gap-2 px-5 py-2.5 bg-black/40 backdrop-blur-md rounded-full border transition-all text-sm font-medium shadow-lg hover:shadow-xl",
+              showBackdrop ? "border-primary/50 text-white shadow-[0_0_15px_rgba(244,63,94,0.3)] bg-primary/10" : "border-white/10 text-white/70 hover:bg-white/10"
             )}
           >
-            <ImageIcon size={16} />
-            <span className="text-sm font-bold">Backdrop</span>
+            <ImageIcon size={16} className={showBackdrop ? "text-primary" : ""} />
+            <span>Backdrop</span>
           </button>
           <button
             onClick={toggleFullscreen}
-            className="p-2 rounded-full glass border border-white/10 text-white/50 hover:text-white transition-all"
+            className="p-2.5 bg-black/40 backdrop-blur-md rounded-full border border-white/10 text-white/70 hover:text-white hover:bg-white/10 transition-all shadow-lg"
           >
             {isFullscreen ? <Minimize2 size={20} /> : <Maximize2 size={20} />}
           </button>
@@ -269,19 +258,25 @@ const KaraokeMode = forwardRef<KaraokeModeRef, KaraokeModeProps>(
 
         {/* Bottom Controls */}
         <div className="relative z-10 p-8">
-          <div className="max-w-4xl mx-auto glass rounded-2xl p-6 border border-white/10">
+          <div className="max-w-4xl mx-auto bg-black/40 backdrop-blur-md p-6 rounded-3xl border border-white/10 shadow-2xl relative">
             {/* Progress Bar */}
             <div className="flex items-center gap-4 mb-4">
-              <span className="text-sm font-mono text-muted">{formatTime(currentTime)}</span>
-              <input
-                type="range"
-                min={0}
-                max={duration || 100}
-                value={currentTime}
-                onChange={handleSeek}
-                className="flex-1 h-2 appearance-none bg-white/10 rounded-full cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-4 [&::-webkit-slider-thumb]:h-4 [&::-webkit-slider-thumb]:bg-accent [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:cursor-pointer"
-              />
-              <span className="text-sm font-mono text-muted">{formatTime(duration)}</span>
+              <span className="text-sm font-medium text-white/50">{formatTime(currentTime)}</span>
+              <div className="flex-1 relative h-1.5 bg-white/10 rounded-full shadow-inner border border-white/5 overflow-hidden">
+                <input
+                  type="range"
+                  min={0}
+                  max={duration || 100}
+                  value={currentTime}
+                  onChange={handleSeek}
+                  className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10"
+                />
+                <div 
+                  className="h-full bg-gradient-to-r from-primary to-accent pointer-events-none rounded-full"
+                  style={{ width: `${duration > 0 ? (currentTime / duration) * 100 : 0}%` }}
+                />
+              </div>
+              <span className="text-sm font-medium text-white/50">{formatTime(duration)}</span>
             </div>
 
             {/* Playback Controls */}
@@ -292,23 +287,23 @@ const KaraokeMode = forwardRef<KaraokeModeRef, KaraokeModeProps>(
                     audioRef.current.currentTime = 0;
                   }
                 }}
-                className="p-3 rounded-full glass border border-white/10 hover:bg-white/10 transition-all"
+                className="p-3 rounded-full hover:bg-white/10 transition-all text-white/50 hover:text-white"
               >
-                <RotateCcw size={20} />
+                <RotateCcw size={22} />
               </button>
 
               <button
                 onClick={togglePlay}
-                className="w-16 h-16 rounded-full bg-accent flex items-center justify-center text-white shadow-lg shadow-accent/30 hover:shadow-accent/50 transition-all hover:scale-105"
+                className="w-16 h-16 bg-gradient-to-r from-primary to-accent rounded-full flex items-center justify-center text-white transition-all shadow-[0_0_15px_rgba(244,63,94,0.4)] hover:shadow-[0_0_25px_rgba(244,63,94,0.6)] hover:scale-105 active:scale-95"
               >
                 {isPlaying ? <Pause size={28} fill="currentColor" /> : <Play size={28} fill="currentColor" className="ml-1" />}
               </button>
 
               <button
                 onClick={() => setIsMuted(!isMuted)}
-                className="p-3 rounded-full glass border border-white/10 hover:bg-white/10 transition-all"
+                className="p-3 rounded-full hover:bg-white/10 transition-all text-white/50 hover:text-white"
               >
-                {isMuted ? <VolumeX size={20} /> : <Volume2 size={20} />}
+                {isMuted ? <VolumeX size={22} /> : <Volume2 size={22} />}
               </button>
             </div>
           </div>

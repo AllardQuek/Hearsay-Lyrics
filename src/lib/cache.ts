@@ -1,4 +1,17 @@
-import { DirectorLine } from "@/app/api/director/route";
+import type { DirectorLine } from "@/app/api/director/route";
+
+const CACHEABLE_SONG_IDS = ["love-confession"] as const;
+
+export type CacheableSongId = (typeof CACHEABLE_SONG_IDS)[number];
+export type CacheMode = "prefer-cache" | "bypass-cache" | "refresh-cache";
+
+export function isCacheableSongId(songId: unknown): songId is CacheableSongId {
+  return typeof songId === "string" && (CACHEABLE_SONG_IDS as readonly string[]).includes(songId);
+}
+
+export function isCacheMode(value: unknown): value is CacheMode {
+  return value === "prefer-cache" || value === "bypass-cache" || value === "refresh-cache";
+}
 
 export interface CachedSongAssets {
   songId: string;
@@ -22,7 +35,7 @@ export async function loadCachedAssets(songId: string): Promise<CachedSongAssets
     
     const data = await response.json();
     return data as CachedSongAssets;
-  } catch (error) {
+  } catch {
     console.log(`[cache] No cached assets for ${songId}`);
     return null;
   }

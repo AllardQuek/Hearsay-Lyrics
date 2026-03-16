@@ -3,12 +3,12 @@ import { Inter, Outfit } from "next/font/google";
 import "./globals.css";
 
 const inter = Inter({
-  variable: "--font-inter",
+  variable: "--font-sans",
   subsets: ["latin"],
 });
 
 const outfit = Outfit({
-  variable: "--font-outfit",
+  variable: "--font-display",
   subsets: ["latin"],
 });
 
@@ -26,7 +26,7 @@ export default function RootLayout({
   return (
     <html lang="en" className="dark">
       <body
-        className={`${inter.variable} ${outfit.variable} antialiased bg-background text-foreground transition-colors duration-300`}
+        className={`${inter.variable} ${outfit.variable} antialiased bg-background text-foreground transition-colors duration-300 font-sans`}
       >
         {children}
       </body>

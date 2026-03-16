@@ -4,6 +4,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import { Film, Sparkles, Music, Palette, Wand2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { DirectorLine } from "@/app/api/director/route";
+import Image from "next/image";
 
 interface DirectorLoadingProps {
   currentLine?: DirectorLine;
@@ -11,15 +12,6 @@ interface DirectorLoadingProps {
   completedLines: number;
   phase: "scripting" | "visualizing" | "complete";
 }
-
-const DIRECTOR_PHRASES = [
-  "KTV Director is scripting your experience...",
-  "Translating sounds to singable English...",
-  "Visualizing surreal scenes...",
-  "Adding cinematic flair...",
-  "Preparing your karaoke masterpiece...",
-  "Syncing syllables to the rhythm...",
-];
 
 export default function DirectorLoading({
   currentLine,
@@ -31,45 +23,32 @@ export default function DirectorLoading({
 
   return (
     <motion.div
-      initial={{ opacity: 0 }}
-      animate={{ opacity: 1 }}
-      exit={{ opacity: 0 }}
-      className="relative overflow-hidden rounded-[2.5rem] border border-white/10 bg-gradient-to-br from-primary/5 via-black to-accent/5 p-8 md:p-12"
+      initial={{ opacity: 0, y: 10 }}
+      animate={{ opacity: 1, y: 0 }}
+      exit={{ opacity: 0, y: -10 }}
+      className="relative overflow-hidden bg-black/40 backdrop-blur-md rounded-3xl border border-white/10 p-8 md:p-12 shadow-2xl"
     >
-      {/* Animated Background Glow */}
-      <div className="absolute inset-0 overflow-hidden pointer-events-none">
-        <motion.div
-          animate={{
-            x: ["-20%", "20%", "-20%"],
-            y: ["-10%", "10%", "-10%"],
-          }}
-          transition={{ duration: 8, repeat: Infinity, ease: "linear" }}
-          className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[600px] h-[600px] bg-primary/20 blur-[120px] rounded-full"
-        />
-        <motion.div
-          animate={{
-            x: ["20%", "-20%", "20%"],
-            y: ["10%", "-10%", "10%"],
-          }}
-          transition={{ duration: 10, repeat: Infinity, ease: "linear" }}
-          className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[400px] h-[400px] bg-accent/20 blur-[100px] rounded-full"
-        />
+      {/* Animated Background */}
+      <div className="absolute inset-0 overflow-hidden pointer-events-none opacity-20">
+        <div className="w-full h-full opacity-30" style={{ backgroundImage: 'radial-gradient(circle at center, rgba(244,63,94,0.15) 0%, transparent 70%)' }} />
       </div>
 
       {/* Header */}
-      <div className="relative z-10 flex items-center justify-center gap-3 mb-12">
+      <div className="relative z-10 flex items-center justify-center gap-4 mb-12">
         <motion.div
           animate={{ rotate: 360 }}
-          transition={{ duration: 4, repeat: Infinity, ease: "linear" }}
+          transition={{ duration: 8, repeat: Infinity, ease: "linear" }}
+          className="p-3 bg-primary/10 rounded-full border border-primary/20 shadow-inner"
         >
-          <Film className="text-accent" size={28} />
+          <Film className="text-primary drop-shadow-md" size={24} />
         </motion.div>
-        <h2 className="text-3xl font-display font-black">KTV Director</h2>
+        <h2 className="text-2xl font-bold tracking-wider text-primary drop-shadow-md">KTV Director</h2>
         <motion.div
           animate={{ scale: [1, 1.2, 1] }}
           transition={{ duration: 2, repeat: Infinity }}
+          className="p-3 bg-primary/10 rounded-full border border-primary/20 shadow-inner"
         >
-          <Sparkles className="text-primary" size={24} />
+          <Sparkles className="text-primary drop-shadow-md" size={24} />
         </motion.div>
       </div>
 
@@ -121,12 +100,15 @@ export default function DirectorLoading({
                 initial={{ opacity: 0, scale: 0.8 }}
                 animate={{ opacity: 1, scale: 1 }}
                 transition={{ delay: 0.5 }}
-                className="mx-auto w-48 h-28 rounded-xl overflow-hidden border border-white/20 shadow-2xl"
+                className="relative mx-auto w-48 h-28 rounded-xl border border-primary/40 overflow-hidden p-1 bg-black/50 shadow-[0_0_15px_rgba(244,63,94,0.3)] backdrop-blur-sm"
               >
-                <img
+                <div className="absolute top-0 right-0 w-2 h-2 rounded-bl-sm bg-primary border-l border-b border-primary/50 z-10" />
+                <Image
                   src={`data:${currentLine.imageMimeType || "image/png"};base64,${currentLine.imageBase64}`}
                   alt="Scene preview"
-                  className="w-full h-full object-cover"
+                  fill
+                  unoptimized
+                  className="object-cover opacity-80 rounded-lg"
                 />
               </motion.div>
             )}
@@ -136,21 +118,21 @@ export default function DirectorLoading({
 
       {/* Progress */}
       <div className="relative z-10 mt-12 space-y-4">
-        <div className="flex justify-between text-sm">
-          <span className="text-muted flex items-center gap-2">
-            <Music size={14} />
+        <div className="flex justify-between text-sm uppercase tracking-widest font-mono font-bold">
+          <span className="text-white/60 flex items-center gap-2">
+            <Music size={14} className="text-primary"/>
             {phase === "scripting" && "Writing singable lyrics..."}
             {phase === "visualizing" && "Generating visual scenes..."}
             {phase === "complete" && "Ready!"}
           </span>
-          <span className="font-mono text-accent">
+          <span className="font-mono text-primary">
             {completedLines}/{totalLines} lines
           </span>
         </div>
 
-        <div className="h-2 bg-white/5 rounded-full overflow-hidden">
+        <div className="h-2 bg-black/50 rounded-full border border-white/5 shadow-inner overflow-hidden">
           <motion.div
-            className="h-full bg-gradient-to-r from-primary to-accent"
+            className="h-full bg-gradient-to-r from-primary to-accent rounded-full"
             initial={{ width: 0 }}
             animate={{ width: `${progress}%` }}
             transition={{ duration: 0.5 }}
@@ -163,20 +145,20 @@ export default function DirectorLoading({
             { id: "scripting", icon: Wand2, label: "Script" },
             { id: "visualizing", icon: Palette, label: "Visualize" },
             { id: "complete", icon: Sparkles, label: "Complete" },
-          ].map((step, idx) => (
+          ].map((step) => (
             <div
               key={step.id}
               className={cn(
                 "flex flex-col items-center gap-2 transition-all",
-                phase === step.id ? "text-accent" : "text-muted/30"
+                phase === step.id ? "text-primary" : "text-white/40"
               )}
             >
               <div
                 className={cn(
-                  "w-10 h-10 rounded-full flex items-center justify-center border transition-all",
+                  "w-10 h-10 rounded-full flex items-center justify-center transition-all shadow-sm border",
                   phase === step.id
-                    ? "border-accent bg-accent/20"
-                    : "border-white/10"
+                    ? "border-primary/50 text-white bg-primary shadow-[0_0_15px_rgba(244,63,94,0.4)]"
+                    : "border-white/10 bg-black/40 backdrop-blur-sm hover:bg-white/5"
                 )}
               >
                 <step.icon size={18} />

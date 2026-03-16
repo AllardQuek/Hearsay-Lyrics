@@ -1,280 +1,229 @@
 "use client";
 
-import { useState, useEffect, useRef } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import {
-  X,
-  ChevronLeft,
-  ChevronRight,
-  Play,
-  Pause,
+import { 
+  X, 
+  Play, 
+  Pause, 
+  SkipForward, 
+  SkipBack, 
+  Volume2, 
+  VolumeX, 
   Film,
-  Sparkles,
-  Music,
-  Palette,
-  Quote,
+  Zap
 } from "lucide-react";
-import { cn } from "@/lib/utils";
+import { useState, useEffect, useRef } from "react";
 import { DirectorLine } from "@/app/api/director/route";
+import { cn } from "@/lib/utils";
+import Image from "next/image";
 
 interface StoryboardProps {
   lines: DirectorLine[];
   onClose: () => void;
   audioSrc?: string;
-  onEnterKaraoke?: () => void;
+  className?: string;
 }
 
-export default function Storyboard({ lines, onClose, audioSrc, onEnterKaraoke }: StoryboardProps) {
+export default function Storyboard({ lines, onClose, audioSrc, className }: StoryboardProps) {
   const [currentIndex, setCurrentIndex] = useState(0);
-  const [isPlaying, setIsPlaying] = useState(true);
-  const timerRef = useRef<NodeJS.Timeout | null>(null);
+  const [isPlaying, setIsPlaying] = useState(false);
+  const [isMuted, setIsMuted] = useState(false);
   const audioRef = useRef<HTMLAudioElement>(null);
 
-  const activeLines = lines.filter((l) => l.hearsay);
-  const currentLine = activeLines[currentIndex];
-
-  // Auto-advance timer
+  // Automatic slideshow/playback logic
   useEffect(() => {
-    if (!isPlaying || activeLines.length === 0) {
-      if (timerRef.current) clearInterval(timerRef.current);
-      return;
+    let interval: NodeJS.Timeout;
+    if (isPlaying && lines.length > 0) {
+      interval = setInterval(() => {
+        setCurrentIndex((prev) => (prev + 1) % lines.length);
+      }, 5000); // 5s per scene fallback
     }
-    timerRef.current = setInterval(() => {
-      setCurrentIndex((prev) => {
-        if (prev >= activeLines.length - 1) {
-          setIsPlaying(false);
-          return prev;
-        }
-        return prev + 1;
-      });
-    }, 4000);
-    return () => {
-      if (timerRef.current) clearInterval(timerRef.current);
-    };
-  }, [isPlaying, activeLines.length]);
+    return () => clearInterval(interval);
+  }, [isPlaying, lines.length]);
 
-  const goTo = (idx: number) => {
-    if (idx >= 0 && idx < activeLines.length) {
-      if (timerRef.current) clearInterval(timerRef.current);
-      setCurrentIndex(idx);
-      setIsPlaying(true);
-    }
-  };
-
-  const handleKeyDown = (e: KeyboardEvent) => {
-    if (e.key === "Escape") onClose();
-    if (e.key === "ArrowRight") goTo(currentIndex + 1);
-    if (e.key === "ArrowLeft") goTo(currentIndex - 1);
-    if (e.key === " ") {
-      e.preventDefault();
-      setIsPlaying((p) => !p);
-    }
-  };
-
-  useEffect(() => {
-    window.addEventListener("keydown", handleKeyDown);
-    return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [currentIndex]); // eslint-disable-line
-
-  // Get gradient colors from palette
-  const getGradient = (palette?: string[]) => {
-    if (!palette || palette.length < 2) return "from-primary/20 to-accent/20";
-    return `from-[${palette[0]}]/30 to-[${palette[1]}]/30`;
-  };
-
-  const moodEmoji: Record<string, string> = {
-    dreamy: "🌙",
-    energetic: "⚡",
-    romantic: "💕",
-    melancholy: "🌧",
-    playful: "✨",
-  };
-
-  if (!currentLine) {
-    return (
-      <motion.div
-        initial={{ opacity: 0 }}
-        animate={{ opacity: 1 }}
-        exit={{ opacity: 0 }}
-        className="fixed inset-0 z-[100] bg-black/95 flex items-center justify-center"
-      >
-        <p className="text-muted">No storyboard content available</p>
-        <button onClick={onClose} className="absolute top-6 right-6 text-white/50 hover:text-white">
-          <X size={32} />
-        </button>
-      </motion.div>
-    );
-  }
+  const togglePlay = () => setIsPlaying(!isPlaying);
+  const currentLine = lines[currentIndex];
 
   return (
     <motion.div
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
       exit={{ opacity: 0 }}
-      className="fixed inset-0 z-[100] bg-black overflow-hidden"
+      className={cn(
+        "fixed inset-0 z-50 bg-black flex flex-col items-center justify-center p-4 md:p-12 overflow-hidden",
+        className
+      )}
     >
-      {/* Background Image with Ken Burns effect */}
-      <AnimatePresence mode="wait">
-        <motion.div
-          key={currentIndex}
-          initial={{ opacity: 0, scale: 1.1 }}
-          animate={{ opacity: 1, scale: 1 }}
-          exit={{ opacity: 0, scale: 0.95 }}
-          transition={{ duration: 0.8 }}
-          className="absolute inset-0"
-        >
-          {currentLine.imageBase64 ? (
-            <img
-              src={`data:${currentLine.imageMimeType || "image/png"};base64,${currentLine.imageBase64}`}
-              alt={currentLine.visual}
-              className="w-full h-full object-cover"
-            />
-          ) : (
-            <div className={cn("w-full h-full bg-gradient-to-br", getGradient(currentLine.palette))} />
-          )}
-          {/* Gradient overlays for text readability */}
-          <div className="absolute inset-0 bg-gradient-to-t from-black via-black/40 to-transparent" />
-          <div className="absolute inset-0 bg-gradient-to-r from-black/60 via-transparent to-black/60" />
-        </motion.div>
-      </AnimatePresence>
+      {/* 1. Global Scanline & Grain Overlays */}
+      
+      <div className="absolute inset-0 pointer-events-none z-10 noise opacity-[0.03]" />
 
-      {/* Close Button */}
-      <button
-        onClick={onClose}
-        className="absolute top-6 right-6 z-50 p-3 rounded-full glass border border-white/10 text-white/70 hover:text-white hover:bg-white/10 transition-all"
-      >
-        <X size={24} />
-      </button>
-
-      {/* Main Content */}
-      <div className="relative z-10 h-full flex flex-col justify-end p-8 md:p-16">
-        {/* Top Badge */}
-        <motion.div
-          initial={{ opacity: 0, y: -20 }}
-          animate={{ opacity: 1, y: 0 }}
-          className="absolute top-8 left-8 flex items-center gap-3"
-        >
-          <div className="flex items-center gap-2 px-4 py-2 rounded-full glass border border-white/10">
-            <Film size={16} className="text-accent" />
-            <span className="text-sm font-display font-bold">KTV Director&apos;s Vision</span>
+      {/* 2. Top Navigation Bar */}
+      <div className="absolute top-0 left-0 right-0 p-8 flex items-center justify-between z-20">
+        <div className="flex flex-col gap-1">
+          <div className="flex items-center gap-3">
+            <Film size={20} className="text-primary" />
+            <h2 className="text-xl font-display font-medium uppercase tracking-widest text-white">Project Premiere</h2>
           </div>
-          <div className="flex items-center gap-2 px-3 py-2 rounded-full glass border border-white/10">
-            <span>{moodEmoji[currentLine.mood] || "✨"}</span>
-            <span className="text-xs uppercase tracking-wider text-muted">{currentLine.mood}</span>
-          </div>
-        </motion.div>
+          <span className="text-[10px] font-medium text-white/40 tracking-wider">
+            SCENE_{String(currentIndex + 1).padStart(3, '0')} / {String(lines.length).padStart(3, '0')}
+          </span>
+        </div>
+        <button 
+          onClick={onClose}
+          className="p-3 bg-black/40 border border-white/20 hover:bg-white hover:text-black text-white transition-all rounded-full backdrop-blur-md"
+        >
+          <X size={24} />
+        </button>
+      </div>
 
-        {/* Lyrics Display */}
+      {/* 3. Main Stage: Image Projection & Dynamic Subtitles */}
+      <div className="relative w-full max-w-7xl aspect-video bg-black rounded-3xl border border-white/10 overflow-hidden group shadow-[0_30px_60px_-15px_rgba(0,0,0,0.5)]">
         <AnimatePresence mode="wait">
           <motion.div
             key={currentIndex}
-            initial={{ opacity: 0, y: 40 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: -40 }}
-            transition={{ duration: 0.5 }}
-            className="space-y-6 max-w-4xl"
+            initial={{ scale: 1.1, opacity: 0, filter: "blur(10px)" }}
+            animate={{ scale: 1, opacity: 1, filter: "blur(0px)" }}
+            exit={{ scale: 0.95, opacity: 0, filter: "blur(10px)" }}
+            transition={{ duration: 1.2, ease: "circOut" }}
+            className="absolute inset-0 flex items-center justify-center overflow-hidden bg-black"
           >
-            {/* Chinese + Pinyin */}
-            <div className="space-y-1">
-              <p className="text-2xl md:text-3xl font-medium text-white/60">{currentLine.chinese}</p>
-              <p className="text-sm text-white/40 font-mono">{currentLine.pinyin}</p>
-            </div>
-
-            {/* The Hearsay - Hero Text */}
-            <div className="relative">
-              <Quote className="absolute -left-8 -top-2 text-accent/30" size={32} />
-              <h1 className="text-5xl md:text-7xl lg:text-8xl font-display font-black tracking-tight text-white leading-none">
-                {currentLine.hearsay}
-              </h1>
-            </div>
-
-            {/* Visual Description */}
-            <div className="flex items-start gap-3 pt-4">
-              <Palette size={18} className="text-accent mt-1 flex-shrink-0" />
-              <p className="text-lg text-white/70 italic leading-relaxed">{currentLine.visual}</p>
-            </div>
-
-            {/* Original Meaning */}
-            <p className="text-sm text-white/40 flex items-center gap-2">
-              <Music size={14} />
-              Original: &ldquo;{currentLine.meaning}&rdquo;
-            </p>
+            {currentLine?.imageBase64 ? (
+              <div className="relative w-full h-full grayscale opacity-80">
+                <Image 
+                  src={`data:${currentLine.imageMimeType || "image/png"};base64,${currentLine.imageBase64}`}
+                  alt="Vision"
+                  fill
+                  unoptimized
+                  className="object-cover"
+                />
+              </div>
+            ) : (
+              <Zap className="text-primary/10 animate-pulse" size={120} />
+            )}
+            
+            {/* Dark Vignette Overlay */}
+            <div className="absolute inset-0 bg-black/40 border-[16px] border-black/50" />
+            
+            {/* In-Scene Subtitles (Cyber-Trad Cinematic) */}
+            <motion.div 
+              initial={{ y: 50, opacity: 0 }}
+              animate={{ y: 0, opacity: 1 }}
+              transition={{ delay: 0.5, duration: 0.8 }}
+              className="absolute bottom-12 left-12 right-12 text-center"
+            >
+              <div className="flex flex-col items-center gap-6">
+                <div className="space-y-1">
+                  <p className="text-sm font-mono font-bold text-primary tracking-widest uppercase">
+                    {currentLine?.pinyin}
+                  </p>
+                  <p className="text-2xl font-sans font-bold text-white/80 uppercase">
+                    {currentLine?.chinese}
+                  </p>
+                </div>
+                <h1 className="text-5xl md:text-7xl font-display font-bold text-white uppercase tracking-tighter leading-none p-4 bg-black border-4 border-primary inline-block">
+                  {currentLine?.hearsay}
+                </h1>
+                <p className="text-sm font-mono text-white/60 uppercase tracking-widest flex items-center gap-4 bg-black border border-white/20 px-6 py-2 mt-4 inline-flex">
+                  {currentLine?.meaning}
+                </p>
+              </div>
+            </motion.div>
           </motion.div>
         </AnimatePresence>
 
-        {/* Bottom Controls */}
-        <div className="mt-12 flex items-center justify-between">
-          {/* Navigation Dots */}
-          <div className="flex items-center gap-2">
-            {activeLines.map((_, idx) => (
-              <button
-                key={idx}
-                onClick={() => goTo(idx)}
-                className={cn(
-                  "w-2 h-2 rounded-full transition-all duration-300",
-                  idx === currentIndex
-                    ? "w-8 bg-accent"
-                    : idx < currentIndex
-                    ? "bg-white/50"
-                    : "bg-white/20"
-                )}
-              />
-            ))}
-          </div>
-
-          {/* Play/Pause + Nav */}
-          <div className="flex items-center gap-4">
-            <button
-              onClick={() => goTo(currentIndex - 1)}
-              disabled={currentIndex === 0}
-              className="p-3 rounded-full glass border border-white/10 disabled:opacity-30 hover:bg-white/10 transition-all"
-            >
-              <ChevronLeft size={24} />
-            </button>
-
-            <button
-              onClick={() => setIsPlaying((p) => !p)}
-              className="p-4 rounded-full bg-accent text-white hover:bg-accent/80 transition-all shadow-lg shadow-accent/30"
-            >
-              {isPlaying ? <Pause size={24} /> : <Play size={24} className="ml-0.5" />}
-            </button>
-
-            <button
-              onClick={() => goTo(currentIndex + 1)}
-              disabled={currentIndex === activeLines.length - 1}
-              className="p-3 rounded-full glass border border-white/10 disabled:opacity-30 hover:bg-white/10 transition-all"
-            >
-              <ChevronRight size={24} />
-            </button>
-          </div>
-
-          {/* Enter Karaoke Button */}
-          {onEnterKaraoke && (
-            <motion.button
-              whileHover={{ scale: 1.05 }}
-              whileTap={{ scale: 0.95 }}
-              onClick={onEnterKaraoke}
-              className="flex items-center gap-3 px-8 py-4 rounded-full bg-white text-black font-display font-bold hover:bg-primary hover:text-white transition-all shadow-premium"
-            >
-              <Sparkles size={20} />
-              Enter Karaoke Mode
-            </motion.button>
-          )}
-        </div>
-
-        {/* Progress Bar */}
-        <div className="absolute bottom-0 left-0 right-0 h-1 bg-white/10">
-          <motion.div
-            className="h-full bg-accent"
-            initial={{ width: 0 }}
-            animate={{ width: `${((currentIndex + 1) / activeLines.length) * 100}%` }}
-            transition={{ duration: 0.3 }}
-          />
+        {/* Playback Controls (Hover visible) */}
+        <div className="absolute inset-0 flex items-center justify-between px-8 opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none md:pointer-events-auto">
+          <button 
+            onClick={(e) => { e.stopPropagation(); setCurrentIndex((prev) => (prev - 1 + lines.length) % lines.length); }}
+            className="p-3 bg-black/40 border border-white/20 hover:bg-white hover:border-white hover:text-black pointer-events-auto text-white transition-all rounded-full backdrop-blur-md"
+          >
+            <SkipBack size={24} />
+          </button>
+          <button 
+            onClick={(e) => { e.stopPropagation(); setCurrentIndex((prev) => (prev + 1) % lines.length); }}
+            className="p-3 bg-black/40 border border-white/20 hover:bg-white hover:border-white hover:text-black pointer-events-auto text-white transition-all rounded-full backdrop-blur-md"
+          >
+            <SkipForward size={24} />
+          </button>
         </div>
       </div>
 
-      {/* Hidden Audio Element for ambient preview */}
-      {audioSrc && <audio ref={audioRef} src={audioSrc} preload="metadata" />}
+      {/* 4. Playback Controller & Progress Bar */}
+      <div className="w-full max-w-4xl mt-12 flex flex-col gap-8">
+        <div className="flex items-center justify-between gap-12">
+          {/* Controls Cluster */}
+          <div className="flex items-center gap-6">
+            <button 
+              onClick={togglePlay}
+              className="w-16 h-16 bg-white text-black flex items-center justify-center transition-all hover:bg-primary active:scale-95 rounded-full shadow-[0_0_20px_rgba(255,255,255,0.2)] hover:shadow-[0_0_30px_rgba(244,63,94,0.4)]"
+            >
+              {isPlaying ? <Pause size={32} fill="currentColor" /> : <Play size={32} fill="currentColor" className="ml-2" />}
+            </button>
+            <div className="hidden md:flex flex-col gap-1.5 mt-1">
+              <span className="text-xs font-medium text-white/50 tracking-wide">Session Recap</span>
+              <div className="flex items-center gap-4 text-white/80">
+                <button onClick={() => setIsMuted(!isMuted)} className="hover:text-primary transition-colors">
+                  {isMuted ? <VolumeX size={18} /> : <Volume2 size={18} />}
+                </button>
+                <div className="w-20 h-1.5 bg-black/50 overflow-hidden shadow-inner border border-white/5 rounded-full">
+                  <div className="h-full bg-white/80 w-2/3 rounded-full" />
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Timeline / Scrubber */}
+          <div className="flex-1 space-y-3">
+             <div className="w-full h-2 bg-black/50 overflow-hidden shadow-inner group relative cursor-pointer border border-white/5 rounded-full">
+               <div 
+                  className="h-full bg-gradient-to-r from-primary to-accent transition-all duration-300 rounded-full"
+                  style={{ width: `${((currentIndex + 1) / lines.length) * 100}%` }}
+                />
+             </div>
+             <div className="flex justify-between font-mono text-[9px] text-white/20 uppercase tracking-[0.2em]">
+               <span>Sequence Start</span>
+               <span>Scene {currentIndex + 1} Fade Out</span>
+             </div>
+          </div>
+        </div>
+        
+        {/* Film Strip Preview */}
+        <div className="flex gap-3 h-20 overflow-x-auto scrollbar-hide py-2 px-1">
+          {lines.map((l, i) => (
+            <button
+              key={i}
+              onClick={() => setCurrentIndex(i)}
+              className={cn(
+                "flex-shrink-0 w-28 aspect-video rounded-xl transition-all overflow-hidden bg-black/20",
+                i === currentIndex ? "ring-2 ring-primary border-transparent opacity-100 scale-105 shadow-[0_5px_15px_rgba(244,63,94,0.3)]" : "border border-white/10 opacity-40 hover:opacity-70"
+              )}
+            >
+              {l.imageBase64 && (
+                <div className="relative w-full h-full">
+                  <Image 
+                    src={`data:${l.imageMimeType};base64,${l.imageBase64}`} 
+                    alt="" 
+                    fill
+                    unoptimized
+                    className="object-cover" 
+                  />
+                </div>
+              )}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {audioSrc && (
+        <audio 
+          ref={audioRef} 
+          src={audioSrc} 
+          muted={isMuted} 
+          onPlay={() => setIsPlaying(true)} 
+          onPause={() => setIsPlaying(false)}
+        />
+      )}
     </motion.div>
   );
 }

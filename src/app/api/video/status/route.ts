@@ -40,7 +40,9 @@ export async function POST(req: Request) {
     const data = await pollRes.json();
     if (!pollRes.ok) {
       console.error("[video/status] Poll error:", JSON.stringify(data));
-      return NextResponse.json({ error: data?.error?.message || "Status check failed" }, { status: pollRes.status });
+      const message = data?.error?.message || "Status check failed";
+      const isRateLimit = pollRes.status === 429 || /rate limit|quota|resource exhausted|429/i.test(String(message));
+      return NextResponse.json({ error: message, isRateLimit }, { status: pollRes.status });
     }
 
     // Log full response shape so we can see the actual structure during development
@@ -51,7 +53,9 @@ export async function POST(req: Request) {
     }
 
     if (data.error) {
-      return NextResponse.json({ done: true, error: data.error?.message || "Video generation failed" });
+      const message = data.error?.message || "Video generation failed";
+      const isRateLimit = /rate limit|quota|resource exhausted|429/i.test(String(message));
+      return NextResponse.json({ done: true, error: message, isRateLimit });
     }
 
     // Vertex AI predictLongRunning uses `predictions` array in the response.
