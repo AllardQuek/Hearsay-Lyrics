@@ -2,14 +2,28 @@
 
 import { useState, useRef, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { Sparkles, Music, Share2, Github, Layout, Loader2, Mic2, ArrowUp, ChevronDown } from "lucide-react";
+import { Sparkles, Music, Share2, Github, Layout, Loader2, Mic2, ArrowUp, ChevronDown, Film, Wand2, Play, Pencil } from "lucide-react";
+import { cn } from "@/lib/utils";
 import SongInput from "@/components/SongInput";
 import LyricSheet from "@/components/LyricSheet";
 import LyricVisuals from "@/components/LyricVisuals";
 import VideoClip from "@/components/VideoClip";
+import Storyboard from "@/components/Storyboard";
+import DirectorLoading from "@/components/DirectorLoading";
+import KaraokeMode from "@/components/KaraokeMode";
+import PerformView from "@/components/PerformView";
 import AudioPlayer, { AudioPlayerRef } from "@/components/AudioPlayer";
 import { HearsayLine } from "@/lib/gemini";
+import { DirectorLine } from "@/app/api/director/route";
 import { formatHearsayForClipboard } from "@/lib/utils";
+import { loadCachedAssets, CachedSongAssets, exportAssetsForCache } from "@/lib/cache";
+
+// Expose cache export helper for development
+declare global {
+  interface Window {
+    __exportCache?: () => string;
+  }
+}
 
 export default function Home() {
   const [loading, setLoading] = useState(false);
@@ -21,7 +35,22 @@ export default function Home() {
   const [activeAudioUrl, setActiveAudioUrl] = useState<string | undefined>(undefined);
   const [showVisuals, setShowVisuals] = useState(false);
   const [showVideo, setShowVideo] = useState(false);
+  const [showStoryboard, setShowStoryboard] = useState(false);
+  const [showKaraokeMode, setShowKaraokeMode] = useState(false);
   const [slideCount, setSlideCount] = useState(5);
+  
+  // Compose/Perform tab toggle
+  const [activeTab, setActiveTab] = useState<"compose" | "perform">("compose");
+  
+  // Director mode - unified generation with interleaved output
+  const [directorMode, setDirectorMode] = useState(true);
+  const [directorLines, setDirectorLines] = useState<DirectorLine[]>([]);
+  const [directorPhase, setDirectorPhase] = useState<"scripting" | "visualizing" | "complete">("scripting");
+  const [currentDirectorLine, setCurrentDirectorLine] = useState<DirectorLine | undefined>(undefined);
+  
+  // Cached assets for demo performance
+  const [cachedVideoClips, setCachedVideoClips] = useState<{ verseIndex: number; videoBase64: string; mimeType: string }[]>([]);
+  
   const audioPlayerRef = useRef<AudioPlayerRef>(null);
   const resultsHeaderRef = useRef<HTMLDivElement>(null);
   const resultsEndRef = useRef<HTMLDivElement>(null);
@@ -34,6 +63,20 @@ export default function Home() {
   // without needing to be re-registered every time it changes.
   const isAutoScrollEnabledRef = useRef(true);
   useEffect(() => { isAutoScrollEnabledRef.current = isAutoScrollEnabled; }, [isAutoScrollEnabled]);
+
+  // Development helper: Expose cache export function to window
+  useEffect(() => {
+    window.__exportCache = () => {
+      if (!currentSongId || directorLines.length === 0) {
+        console.error("[cache] No song or director lines to export");
+        return "";
+      }
+      const json = exportAssetsForCache(currentSongId, directorLines, cachedVideoClips);
+      console.log("[cache] Export ready! Copy this JSON to public/cache/" + currentSongId + ".json");
+      return json;
+    };
+    return () => { delete window.__exportCache; };
+  }, [currentSongId, directorLines, cachedVideoClips]);
 
   // Detect manual scroll to disable auto-scroll
   useEffect(() => {
@@ -88,10 +131,44 @@ export default function Home() {
     setCurrentTime(0);
     setError(null);
     setResults([]);
+    setDirectorLines([]);
+    setCachedVideoClips([]);
     setCurrentSongId(songId);
     setActiveAudioUrl(audioUrl);
+    setDirectorPhase("scripting");
+    setCurrentDirectorLine(undefined);
+    setActiveTab("compose"); // Start on compose tab
 
-    if (preComputed && preComputed.length > 0 && songId !== 'custom-upload') {
+    // Try to load cached assets for catalog songs
+    if (songId && songId !== 'custom-upload') {
+      const cached = await loadCachedAssets(songId);
+      if (cached && cached.directorLines.length > 0) {
+        // Use cached director lines (with images)
+        setDirectorLines(cached.directorLines);
+        setCachedVideoClips(cached.videoClips || []);
+        setDirectorPhase("complete");
+        
+        // Convert director lines to hearsay lines for compatibility
+        const hearsayLines: HearsayLine[] = cached.directorLines.map(line => ({
+          chinese: line.chinese,
+          pinyin: line.pinyin,
+          meaning: line.meaning,
+          candidates: [{ text: line.hearsay, phonetic: 0.9, humor: 0.9 }],
+          startTime: preComputed?.find(p => p.chinese === line.chinese)?.startTime,
+        }));
+        
+        setResults(hearsayLines);
+        setLoading(false);
+        setIsAutoScrollEnabled(false);
+        
+        setTimeout(() => {
+          resultsHeaderRef.current?.scrollIntoView({ behavior: "smooth" });
+        }, 100);
+        return;
+      }
+    }
+
+    if (preComputed && preComputed.length > 0 && songId !== 'custom-upload' && !directorMode) {
       // Demo Mode: Fast-path for pre-computed catalog songs
       setResults(preComputed);
       setLoading(false);
@@ -105,49 +182,110 @@ export default function Home() {
     }
 
     try {
-      const response = await fetch("/api/generate", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ text, funnyWeight, audioUrl }),
-      });
+      if (directorMode) {
+        // KTV Director Mode: Unified generation with interleaved text + images
+        const response = await fetch("/api/director", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ text, funnyWeight, generateImages: true }),
+        });
 
-      if (!response.ok) {
-        const errorData = await response.json().catch(() => ({}));
-        throw new Error(errorData.error || `Generation failed (Status ${response.status})`);
-      }
+        if (!response.ok) {
+          const errorData = await response.json().catch(() => ({}));
+          throw new Error(errorData.error || `Director generation failed`);
+        }
 
-      if (!response.body) {
-        throw new Error("Response body is empty");
-      }
+        if (!response.body) throw new Error("Response body is empty");
 
-      const reader = response.body.getReader();
-      const decoder = new TextDecoder();
-      let buffer = "";
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = "";
+        const lines: DirectorLine[] = [];
+        let hasSeenImage = false;
 
-      while (true) {
-        const { value, done } = await reader.read();
-        if (done) break;
+        while (true) {
+          const { value, done } = await reader.read();
+          if (done) break;
 
-        buffer += decoder.decode(value, { stream: true });
-        const parts = buffer.split("\n");
+          buffer += decoder.decode(value, { stream: true });
+          const parts = buffer.split("\n");
+          buffer = parts.pop() || "";
 
-        // Keep the last part in buffer if it's incomplete
-        buffer = parts.pop() || "";
+          for (const part of parts) {
+            if (part.trim()) {
+              try {
+                const line: DirectorLine = JSON.parse(part);
+                lines.push(line);
+                setDirectorLines([...lines]);
+                setCurrentDirectorLine(line);
+                
+                // Update phase based on content
+                if (line.imageBase64 && !hasSeenImage) {
+                  hasSeenImage = true;
+                  setDirectorPhase("visualizing");
+                }
 
-        for (const part of parts) {
-          if (part.trim()) {
-            try {
-              const chunk: HearsayLine[] = JSON.parse(part);
+                // Also update results for karaoke mode compatibility
+                const hearsayLine: HearsayLine = {
+                  chinese: line.chinese,
+                  pinyin: line.pinyin,
+                  meaning: line.meaning,
+                  candidates: [{ text: line.hearsay, phonetic: 0.9, humor: 0.9 }],
+                  startTime: preComputed?.find(p => p.chinese === line.chinese)?.startTime,
+                };
+                setResults((prev) => [...prev, hearsayLine]);
+              } catch (err) {
+                console.error("Error parsing director line:", err);
+              }
+            }
+          }
+        }
+        
+        setDirectorPhase("complete");
+        // Scroll to results header when complete
+        setTimeout(() => {
+          resultsHeaderRef.current?.scrollIntoView({ behavior: "smooth" });
+        }, 500);
+        
+      } else {
+        // Classic mode: Text-only generation
+        const response = await fetch("/api/generate", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ text, funnyWeight, audioUrl }),
+        });
 
-              // Patch with timestamps if available from LRC
-              const patched = chunk.map(line => {
-                const match = preComputed?.find(p => p.chinese === line.chinese);
-                return match ? { ...line, startTime: match.startTime } : line;
-              });
+        if (!response.ok) {
+          const errorData = await response.json().catch(() => ({}));
+          throw new Error(errorData.error || `Generation failed (Status ${response.status})`);
+        }
 
-              setResults((prev) => [...prev, ...patched]);
-            } catch (err) {
-              console.error("Error parsing NDJSON chunk:", err);
+        if (!response.body) throw new Error("Response body is empty");
+
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = "";
+
+        while (true) {
+          const { value, done } = await reader.read();
+          if (done) break;
+
+          buffer += decoder.decode(value, { stream: true });
+          const parts = buffer.split("\n");
+          buffer = parts.pop() || "";
+
+          for (const part of parts) {
+            if (part.trim()) {
+              try {
+                const chunk: HearsayLine[] = JSON.parse(part);
+                const patched = chunk.map(line => {
+                  const match = preComputed?.find(p => p.chinese === line.chinese);
+                  return match ? { ...line, startTime: match.startTime } : line;
+                });
+                setResults((prev) => [...prev, ...patched]);
+              } catch (err) {
+                console.error("Error parsing NDJSON chunk:", err);
+              }
             }
           }
         }
@@ -274,6 +412,44 @@ export default function Home() {
             </div>
           </motion.div>
 
+          {/* Director Mode Toggle */}
+          <motion.div
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.28 }}
+            className="flex justify-center"
+          >
+            <button
+              onClick={() => setDirectorMode(!directorMode)}
+              className={`flex items-center gap-3 px-6 py-3 rounded-full border transition-all ${
+                directorMode
+                  ? "bg-accent/20 border-accent text-accent"
+                  : "bg-white/5 border-white/10 text-muted hover:border-white/30"
+              }`}
+            >
+              <Film size={18} />
+              <span className="font-display font-bold">KTV Director Mode</span>
+              <div className={`w-10 h-5 rounded-full transition-all relative ${
+                directorMode ? "bg-accent" : "bg-white/20"
+              }`}>
+                <div className={`absolute top-0.5 w-4 h-4 rounded-full bg-white transition-all ${
+                  directorMode ? "left-5" : "left-0.5"
+                }`} />
+              </div>
+            </button>
+          </motion.div>
+
+          {directorMode && (
+            <motion.p
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              className="text-center text-muted/60 text-sm -mt-4"
+            >
+              <Sparkles size={14} className="inline mr-1 text-accent" />
+              Generates lyrics + AI visuals in one unified stream
+            </motion.p>
+          )}
+
           <motion.div
             initial={{ opacity: 0, scale: 0.95 }}
             animate={{ opacity: 1, scale: 1 }}
@@ -293,53 +469,148 @@ export default function Home() {
             </motion.div>
           )}
 
+          {/* Director Loading State */}
+          <AnimatePresence>
+            {loading && directorMode && directorLines.length > 0 && (
+              <motion.div
+                initial={{ opacity: 0, y: 20 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -20 }}
+              >
+                <DirectorLoading
+                  currentLine={currentDirectorLine}
+                  totalLines={directorLines.length + 3}
+                  completedLines={directorLines.length}
+                  phase={directorPhase}
+                />
+              </motion.div>
+            )}
+          </AnimatePresence>
+
           {/* Results Area */}
-          {results.length > 0 && (
+          {results.length > 0 && !loading && (
             <motion.div
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               className="space-y-8 scroll-mt-24"
             >
+              {/* Tab Toggle Header */}
               <div
                 ref={resultsHeaderRef}
-                className="flex flex-col md:flex-row items-center justify-between gap-6 pt-12 border-t border-white/5"
+                className="flex flex-col items-center gap-6 pt-12 border-t border-white/5"
               >
-                <h2 className="text-3xl md:text-4xl font-display font-bold flex items-center gap-3">
-                  <Music className="text-primary" /> The Hearsay Sheet
-                </h2>
-                <button
-                  onClick={handleShare}
-                  className="flex items-center gap-2 px-8 py-4 rounded-full bg-white text-black font-display font-bold hover:bg-primary hover:text-white transition-all shadow-premium group"
-                >
-                  <Share2 size={18} className="group-hover:scale-110 transition-transform" />
-                  Share Complete Lyrics
-                </button>
+                {/* Compose / Perform Tabs */}
+                <div className="flex items-center gap-2 p-1.5 rounded-full glass border border-white/10">
+                  <button
+                    onClick={() => setActiveTab("compose")}
+                    className={cn(
+                      "flex items-center gap-2 px-6 py-3 rounded-full font-display font-bold transition-all",
+                      activeTab === "compose" 
+                        ? "bg-white text-black shadow-lg" 
+                        : "text-white/60 hover:text-white"
+                    )}
+                  >
+                    <Pencil size={18} />
+                    Compose
+                  </button>
+                  <button
+                    onClick={() => setActiveTab("perform")}
+                    disabled={!results.some(line => line.startTime !== undefined)}
+                    className={cn(
+                      "flex items-center gap-2 px-6 py-3 rounded-full font-display font-bold transition-all",
+                      activeTab === "perform"
+                        ? "bg-gradient-to-r from-primary to-accent text-white shadow-lg shadow-primary/30"
+                        : "text-white/60 hover:text-white disabled:opacity-30 disabled:cursor-not-allowed"
+                    )}
+                  >
+                    <Play size={18} fill="currentColor" />
+                    Perform
+                  </button>
+                </div>
+
+                {/* Secondary Actions */}
+                <div className="flex items-center gap-3 flex-wrap justify-center">
+                  {directorLines.length > 0 && (
+                    <button
+                      onClick={() => setShowStoryboard(true)}
+                      className="flex items-center gap-2 px-5 py-2.5 rounded-full glass border border-accent/30 text-accent text-sm font-display font-bold hover:bg-accent hover:text-white transition-all"
+                    >
+                      <Film size={16} />
+                      Storyboard
+                    </button>
+                  )}
+                  <button
+                    onClick={handleShare}
+                    className="flex items-center gap-2 px-5 py-2.5 rounded-full glass border border-white/20 text-white/70 text-sm font-display font-bold hover:bg-white hover:text-black transition-all"
+                  >
+                    <Share2 size={16} />
+                    Share
+                  </button>
+                </div>
               </div>
 
-              {/* Audio Player for Karaoke Sync */}
-              {results.some(line => line.startTime !== undefined) && (
-                <motion.div
-                  initial={{ opacity: 0, y: 10 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  className="max-w-2xl mx-auto"
-                >
-                  <AudioPlayer
-                    ref={audioPlayerRef}
-                    onTimeUpdate={setCurrentTime}
-                    src={
-                      currentSongId === 'love-confession' ? '/audio/love-confession.mp3' :
-                        currentSongId === 'dao-xiang' ? '/audio/dao-xiang.mp3' :
-                          activeAudioUrl
-                    }
-                  />
-                </motion.div>
-              )}
+              {/* COMPOSE TAB CONTENT */}
+              <AnimatePresence mode="wait">
+                {activeTab === "compose" && (
+                  <motion.div
+                    key="compose"
+                    initial={{ opacity: 0, x: -20 }}
+                    animate={{ opacity: 1, x: 0 }}
+                    exit={{ opacity: 0, x: -20 }}
+                    transition={{ duration: 0.3 }}
+                    className="space-y-8"
+                  >
+                    {/* Audio Player for Karaoke Sync */}
+                    {results.some(line => line.startTime !== undefined) && (
+                      <motion.div
+                        initial={{ opacity: 0, y: 10 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        className="max-w-2xl mx-auto"
+                      >
+                        <AudioPlayer
+                          ref={audioPlayerRef}
+                          onTimeUpdate={setCurrentTime}
+                          src={
+                            currentSongId === 'love-confession' ? '/audio/love-confession.mp3' :
+                              currentSongId === 'dao-xiang' ? '/audio/dao-xiang.mp3' :
+                                activeAudioUrl
+                          }
+                        />
+                      </motion.div>
+                    )}
 
-              <LyricSheet
-                lines={results}
-                currentTime={currentTime}
-                onLineClick={(time) => audioPlayerRef.current?.seekTo(time)}
-                onShowVisuals={(count) => { setSlideCount(count); setShowVisuals(true); }}                  onShowVideo={() => setShowVideo(true)}              />
+                    <LyricSheet
+                      lines={results}
+                      currentTime={currentTime}
+                      onLineClick={(time) => audioPlayerRef.current?.seekTo(time)}
+                      onShowVisuals={(count) => { setSlideCount(count); setShowVisuals(true); }}
+                      onShowVideo={() => setShowVideo(true)}
+                    />
+                  </motion.div>
+                )}
+
+                {/* PERFORM TAB CONTENT */}
+                {activeTab === "perform" && results.some(line => line.startTime !== undefined) && (
+                  <motion.div
+                    key="perform"
+                    initial={{ opacity: 0, x: 20 }}
+                    animate={{ opacity: 1, x: 0 }}
+                    exit={{ opacity: 0, x: 20 }}
+                    transition={{ duration: 0.3 }}
+                  >
+                    <PerformView
+                      lines={results}
+                      directorLines={directorLines}
+                      audioSrc={
+                        currentSongId === 'love-confession' ? '/audio/love-confession.mp3' :
+                        currentSongId === 'dao-xiang' ? '/audio/dao-xiang.mp3' :
+                        activeAudioUrl
+                      }
+                      preloadedVideos={cachedVideoClips.length > 0 ? cachedVideoClips.map(v => ({ ...v, status: "ready" as const })) : undefined}
+                    />
+                  </motion.div>
+                )}
+              </AnimatePresence>
 
               {/* In-Progress Indicator (Sticky at bottom during stream) */}
               <AnimatePresence>
@@ -432,6 +703,41 @@ export default function Home() {
       <AnimatePresence>
         {showVideo && results.length > 0 && (
           <VideoClip lines={results} onClose={() => setShowVideo(false)} />
+        )}
+      </AnimatePresence>
+
+      {/* Storyboard Overlay (Director Mode) */}
+      <AnimatePresence>
+        {showStoryboard && directorLines.length > 0 && (
+          <Storyboard
+            lines={directorLines}
+            audioSrc={
+              currentSongId === 'love-confession' ? '/audio/love-confession.mp3' :
+              currentSongId === 'dao-xiang' ? '/audio/dao-xiang.mp3' :
+              activeAudioUrl
+            }
+            onClose={() => setShowStoryboard(false)}
+            onEnterKaraoke={() => {
+              setShowStoryboard(false);
+              setShowKaraokeMode(true);
+            }}
+          />
+        )}
+      </AnimatePresence>
+
+      {/* Full Karaoke Mode */}
+      <AnimatePresence>
+        {showKaraokeMode && results.length > 0 && (
+          <KaraokeMode
+            lines={results}
+            directorLines={directorLines}
+            audioSrc={
+              currentSongId === 'love-confession' ? '/audio/love-confession.mp3' :
+              currentSongId === 'dao-xiang' ? '/audio/dao-xiang.mp3' :
+              activeAudioUrl
+            }
+            onClose={() => setShowKaraokeMode(false)}
+          />
         )}
       </AnimatePresence>
     </>

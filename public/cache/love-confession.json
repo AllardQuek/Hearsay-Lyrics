@@ -1,0 +1,17 @@
+{
+  "songId": "love-confession",
+  "generatedAt": "2026-03-16T00:00:00.000Z",
+  "directorLines": [],
+  "videoClips": [],
+  "_note": "This is a placeholder file. Run the app with Director Mode enabled for Love Confession, then use exportAssetsForCache() from browser console to generate actual content. Copy the output here.",
+  "_instructions": [
+    "1. Open the app at http://localhost:3000",
+    "2. Enable KTV Director Mode",
+    "3. Select 'Love Confession' from the catalog",
+    "4. Let generation complete fully (all images)",
+    "5. Open browser DevTools console",
+    "6. Run: copy(window.__exportCache?.())",
+    "7. Paste the content here, replacing this JSON",
+    "8. For video clips, generate them in Perform tab and add manually"
+  ]
+}
