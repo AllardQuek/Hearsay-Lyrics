@@ -1054,7 +1054,7 @@ export default function Home() {
               </h1>
 
               <p className="max-w-2xl text-base text-white/70 leading-relaxed sm:text-lg">
-                Hearsay-style, singability-first lyrics plus synced AI visuals and video, so more people can join KTV across cultures.
+                Edutainment across cultures — singability-first hearsay lyrics with synced AI visuals and video, enabling everyone to sing along across cultures.
               </p>
             </div>
             <SongInput 

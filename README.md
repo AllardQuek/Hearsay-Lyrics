@@ -1,30 +1,34 @@
 # Hearsay Lyrics
 
-AI-powered KTV companion that turns Mandarin lyrics into singable English hearsay lines, then stages them as a multimedia performance.
+Edutainment across cultures.
 
-## Current Status (March 2026)
+AI-powered KTV companion that converts Mandarin lyrics into singable English "hearsay" lines and stages them as a shareable music-video experience, generating per-line visuals and short video clips that come together like a full music video.
 
-The app now supports an interleaved media pipeline:
+## Inspiration
 
-- Text: line-by-line hearsay lyric generation
-- Image: per-line generated visuals streamed alongside lyric data
-- Video: generated short-form clip from top lyric moments
+Inspired by short-form social videos and the user-generated "misheard lyrics" phenomenon. See the project brief in [docs/PRD.md](docs/PRD.md) for background and the hackathon framing.
 
-The main page keeps input + output visible in one flow, with output switching between:
+## Pitch
 
- - Studio mode: editing, refining, variants, slideshow/video triggers
- - Perform mode: synced playback controls and stage view
+A Gemini-powered web app that generates singable English "hearsay" lyrics for Mandarin songs, preserving syllable counts and rhythmic structure. It combines real-time audio sync, per-line personalization, and generative visuals to make foreign-language karaoke inclusive, fun, and shareable.
 
-## What Ships Today
+## Use Cases
+
+- Karaoke inclusion: enable non-Chinese speakers to sing along at KTV nights.
+- Live demos & events: showcase low-latency generation and sync for presentations and hackathons.
+- Social content: create short-form, shareable lyric videos that resonate on social platforms.
+- Language practice: pronunciation guides and incidental learning through singing.
+- Fan engagement: localized, singable lyric experiences for international audiences.
+
+## Current Capabilities
 
 - Mandarin lyrics input (paste or demo catalog)
-- Per-line hearsay generation with pinyin + meaning
-- Inline editing, variants, refine actions
-- Audio input by URL or local upload
-- AI sync for lyric timestamps from uploaded audio
-- Director NDJSON streaming endpoint with progressive per-line updates
-- Generated image backdrop for each line when available
-- Image slideshow mode
+- Per-line hearsay generation with pinyin and meaning
+- Personalization slider and per-line variants
+- Inline editing, variant selection, and refine actions
+- Audio input by URL or local upload with AI-generated timestamps
+- Progressive NDJSON Director endpoint for streaming per-line updates
+- Per-line generated image backdrops and slideshow mode
 - Video clip generation flow (start + poll status)
 - Cache-first demo mode for reproducible runs (`love-confession`)
 
