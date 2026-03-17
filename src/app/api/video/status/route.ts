@@ -21,7 +21,12 @@ async function getAccessToken(): Promise<string> {
 
 export async function POST(req: Request) {
   try {
-    const { operationName } = (await req.json()) as { operationName: string };
+    const { operationName, segmentId, startTime, endTime } = (await req.json()) as {
+      operationName: string;
+      segmentId?: string;
+      startTime?: number;
+      endTime?: number;
+    };
 
     if (!operationName) {
       return NextResponse.json({ error: "No operation name provided" }, { status: 400 });
@@ -49,7 +54,7 @@ export async function POST(req: Request) {
     console.log("[video/status] Full response:", JSON.stringify(data).slice(0, 2000));
 
     if (!data.done) {
-      return NextResponse.json({ done: false });
+      return NextResponse.json({ done: false, segmentId, startTime, endTime });
     }
 
     if (data.error) {
@@ -75,6 +80,9 @@ export async function POST(req: Request) {
         done: true,
         videoBase64: video.bytesBase64Encoded,
         mimeType: video.mimeType || "video/mp4",
+        segmentId,
+        startTime,
+        endTime,
       });
     }
 
@@ -83,6 +91,9 @@ export async function POST(req: Request) {
         done: true,
         videoUri: video.gcsUri,
         mimeType: video.mimeType || "video/mp4",
+        segmentId,
+        startTime,
+        endTime,
       });
     }
 

@@ -5,6 +5,7 @@ import { RefreshCw, Copy, Check, Sparkles, Pencil, Save, X, Send, Loader2, Clapp
 import { useState, useEffect, useRef, type ComponentType } from "react";
 import { cn } from "@/lib/utils";
 import { HearsayLine } from "@/lib/gemini";
+import { formatTimestamp, type MediaSegment, type VideoClipAsset } from "@/lib/media-segments";
 
 interface LyricLineProps {
   line: HearsayLine;
@@ -315,7 +316,25 @@ function LyricLineItem({ line: initialLine, index, isActive, onClick }: LyricLin
   );
 }
 
-export default function LyricSheet({ lines, currentTime = 0, onLineClick, onShowVisuals, onShowVideo }: { lines: HearsayLine[], currentTime?: number, onLineClick?: (time: number) => void, onShowVisuals?: (count: number) => void, onShowVideo?: () => void }) {
+export default function LyricSheet({
+  lines,
+  currentTime = 0,
+  onLineClick,
+  onShowVisuals,
+  onShowVideo,
+  mediaSegments = [],
+  videoClips = {},
+  onToggleSegmentMedia,
+}: {
+  lines: HearsayLine[];
+  currentTime?: number;
+  onLineClick?: (time: number) => void;
+  onShowVisuals?: (count: number) => void;
+  onShowVideo?: () => void;
+  mediaSegments?: MediaSegment[];
+  videoClips?: Record<string, VideoClipAsset>;
+  onToggleSegmentMedia?: (segmentId: string) => void;
+}) {
   // Find the index of the active line: the last line where startTime <= currentTime
   const activeIndex = lines.reduce((acc, line, idx) => {
     if (line.startTime !== undefined && line.startTime <= currentTime) {
@@ -342,10 +361,37 @@ export default function LyricSheet({ lines, currentTime = 0, onLineClick, onShow
 
         {/* Bottom utility bar */}
         <div className="mt-12 pt-8 flex flex-col sm:flex-row items-center justify-between gap-4">
-          <div className="inline-flex items-center gap-2 text-white/50 text-[10px] font-mono font-bold uppercase tracking-widest">
-            <Sparkles size={12} className="text-primary" />
-            Hover over a line to edit lyrics or see variants
-            <Sparkles size={12} className="text-accent" />
+          <div className="w-full space-y-3 sm:w-auto">
+            <div className="inline-flex items-center gap-2 text-white/50 text-[10px] font-mono font-bold uppercase tracking-widest">
+              <Sparkles size={12} className="text-primary" />
+              Hover over a line to edit lyrics or see variants
+              <Sparkles size={12} className="text-accent" />
+            </div>
+
+            {mediaSegments.length > 0 && onToggleSegmentMedia && (
+              <div className="flex flex-wrap items-center gap-2">
+                {mediaSegments.map((segment, index) => {
+                  const clip = videoClips[segment.id];
+                  const clipStatus = clip?.status;
+                  return (
+                    <button
+                      key={segment.id}
+                      onClick={() => onToggleSegmentMedia(segment.id)}
+                      className={cn(
+                        "rounded-full border px-3 py-1 text-[10px] font-mono uppercase tracking-wider transition-colors",
+                        segment.mediaType === "video"
+                          ? "border-accent/60 bg-accent/10 text-accent hover:bg-accent/20"
+                          : "border-white/20 bg-white/5 text-white/70 hover:bg-white/10"
+                      )}
+                      title="Toggle image/video for this segment"
+                    >
+                      S{index + 1} {formatTimestamp(segment.startTime)}-{formatTimestamp(segment.endTime)} · {segment.mediaType}
+                      {segment.mediaType === "video" && clipStatus ? ` (${clipStatus})` : ""}
+                    </button>
+                  );
+                })}
+              </div>
+            )}
           </div>
           <div className="flex items-center gap-3 flex-wrap justify-center sm:justify-end">
             {onShowVisuals && (

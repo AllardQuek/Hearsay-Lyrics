@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { motion } from "framer-motion";
 import { Play, Sparkles, Package, Layers, Activity } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -13,6 +13,12 @@ import { type HearsayCandidate } from "@/lib/gemini";
 import { type DirectorLine } from "@/app/api/director/route";
 import { isCacheableSongId, type CacheMode } from "@/lib/cache";
 import { formatHearsayForClipboard } from "@/lib/utils";
+import {
+  buildMediaSegments,
+  type MediaSegment,
+  type SegmentMediaType,
+  type VideoClipAsset,
+} from "@/lib/media-segments";
 
 type HearsayLine = {
   original: string;
@@ -28,6 +34,15 @@ type HearsayLine = {
 
 type DirectorPhase = "scripting" | "visualizing" | "complete";
 type CacheRuntimeStatus = "idle" | "hit" | "miss" | "bypassed" | "refreshed" | "manual-update";
+
+type SegmentOperation = {
+  operationName: string;
+  scenePrompt?: string;
+};
+
+function wait(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
 
 export default function Home() {
   const [hearsayResults, setHearsayResults] = useState<HearsayLine[]>([]);
@@ -45,14 +60,225 @@ export default function Home() {
   const [cacheRuntimeStatus, setCacheRuntimeStatus] = useState<CacheRuntimeStatus>("idle");
 
   const [outputMode, setOutputMode] = useState<"studio" | "perform">("studio");
+  const [segmentOverrides, setSegmentOverrides] = useState<Record<string, SegmentMediaType>>({});
+  const [videoClips, setVideoClips] = useState<Record<string, VideoClipAsset>>({});
   const abortControllerRef = useRef<AbortController | null>(null);
   const outputSectionRef = useRef<HTMLDivElement | null>(null);
+  const inFlightSegmentsRef = useRef<Set<string>>(new Set());
+  const generationEpochRef = useRef(0);
 
   const isStudioMode = outputMode === "studio";
   const outputModeTitle = isStudioMode ? "Studio" : "Presenter";
   const outputModeDescription = isStudioMode
     ? "Tune and refine your lyric sheet before showtime."
     : "Play back synced lyrics with cinematic visuals and controls.";
+
+  const mediaSegments = useMemo(
+    () => buildMediaSegments(hearsayResults, {
+      targetSeconds: 4,
+      minVideoSegments: 1,
+      maxVideoSegments: 3,
+      overrides: segmentOverrides,
+    }),
+    [hearsayResults, segmentOverrides]
+  );
+
+  const startSegmentVideoGeneration = useCallback(
+    async (segment: MediaSegment, epoch: number) => {
+      const relatedLines = segment.lineIndices
+        .map((index) => hearsayResults[index])
+        .filter(Boolean);
+
+      const relatedDirectorLines = segment.lineIndices
+        .map((index) => directorLines[index])
+        .filter(Boolean);
+
+      const mood = relatedDirectorLines.find((line) => line?.mood)?.mood;
+      const palette = relatedDirectorLines.find((line) => line?.palette?.length)?.palette;
+
+      const requestPayload = {
+        segment: {
+          segmentId: segment.id,
+          startTime: segment.startTime,
+          endTime: segment.endTime,
+          durationSeconds: segment.durationSeconds,
+          hearsayLines: relatedLines.map((line) => line.candidates?.[0]?.text).filter(Boolean),
+          mood,
+          palette,
+        },
+      };
+
+      setVideoClips((prev) => ({
+        ...prev,
+        [segment.id]: {
+          segmentId: segment.id,
+          clipStart: segment.startTime,
+          clipEnd: segment.endTime,
+          status: "generating",
+        },
+      }));
+
+      let operation: SegmentOperation;
+
+      try {
+        const initRes = await fetch("/api/video", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(requestPayload),
+        });
+        const initData = (await initRes.json()) as SegmentOperation & { error?: string };
+
+        if (!initRes.ok || initData.error || !initData.operationName) {
+          throw new Error(initData.error || "Failed to start segment video generation");
+        }
+
+        operation = {
+          operationName: initData.operationName,
+          scenePrompt: initData.scenePrompt,
+        };
+
+        setVideoClips((prev) => {
+          const existing = prev[segment.id];
+          if (!existing || generationEpochRef.current !== epoch) return prev;
+          return {
+            ...prev,
+            [segment.id]: {
+              ...existing,
+              operationName: operation.operationName,
+              scenePrompt: operation.scenePrompt,
+            },
+          };
+        });
+      } catch (error) {
+        inFlightSegmentsRef.current.delete(segment.id);
+        const message = error instanceof Error ? error.message : "Failed to start segment video generation";
+        setVideoClips((prev) => ({
+          ...prev,
+          [segment.id]: {
+            segmentId: segment.id,
+            clipStart: segment.startTime,
+            clipEnd: segment.endTime,
+            status: "failed",
+            error: message,
+          },
+        }));
+        return;
+      }
+
+      const maxPollAttempts = 30;
+      for (let attempt = 0; attempt < maxPollAttempts; attempt++) {
+        if (generationEpochRef.current !== epoch) {
+          inFlightSegmentsRef.current.delete(segment.id);
+          return;
+        }
+
+        await wait(5000);
+
+        try {
+          const statusRes = await fetch("/api/video/status", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              operationName: operation.operationName,
+              segmentId: segment.id,
+              startTime: segment.startTime,
+              endTime: segment.endTime,
+            }),
+          });
+          const statusData = (await statusRes.json()) as {
+            done?: boolean;
+            error?: string;
+            mimeType?: string;
+            videoBase64?: string;
+            videoUri?: string;
+          };
+
+          if (!statusRes.ok || statusData.error) {
+            throw new Error(statusData.error || "Segment video status check failed");
+          }
+
+          if (!statusData.done) {
+            continue;
+          }
+
+          if (!statusData.videoBase64 && !statusData.videoUri) {
+            throw new Error("Segment video payload missing media data");
+          }
+
+          inFlightSegmentsRef.current.delete(segment.id);
+          setVideoClips((prev) => ({
+            ...prev,
+            [segment.id]: {
+              segmentId: segment.id,
+              clipStart: segment.startTime,
+              clipEnd: segment.endTime,
+              status: "ready",
+              operationName: operation.operationName,
+              scenePrompt: operation.scenePrompt,
+              mimeType: statusData.mimeType || "video/mp4",
+              videoBase64: statusData.videoBase64,
+              videoUri: statusData.videoUri,
+            },
+          }));
+          return;
+        } catch (error) {
+          inFlightSegmentsRef.current.delete(segment.id);
+          const message = error instanceof Error ? error.message : "Segment video polling failed";
+          setVideoClips((prev) => ({
+            ...prev,
+            [segment.id]: {
+              segmentId: segment.id,
+              clipStart: segment.startTime,
+              clipEnd: segment.endTime,
+              status: "failed",
+              operationName: operation.operationName,
+              scenePrompt: operation.scenePrompt,
+              error: message,
+            },
+          }));
+          return;
+        }
+      }
+
+      inFlightSegmentsRef.current.delete(segment.id);
+      setVideoClips((prev) => ({
+        ...prev,
+        [segment.id]: {
+          segmentId: segment.id,
+          clipStart: segment.startTime,
+          clipEnd: segment.endTime,
+          status: "failed",
+          operationName: operation.operationName,
+          scenePrompt: operation.scenePrompt,
+          error: "Segment video generation timed out",
+        },
+      }));
+    },
+    [directorLines, hearsayResults]
+  );
+
+  useEffect(() => {
+    if (directorPhase !== "complete" || mediaSegments.length === 0) return;
+
+    for (const segment of mediaSegments) {
+      if (segment.mediaType !== "video") continue;
+
+      const existing = videoClips[segment.id];
+      if (existing && existing.status !== "queued") continue;
+      if (inFlightSegmentsRef.current.has(segment.id)) continue;
+
+      inFlightSegmentsRef.current.add(segment.id);
+      void startSegmentVideoGeneration(segment, generationEpochRef.current);
+    }
+  }, [directorPhase, mediaSegments, startSegmentVideoGeneration, videoClips]);
+
+  useEffect(() => {
+    const inFlightSegments = inFlightSegmentsRef.current;
+    return () => {
+      generationEpochRef.current += 1;
+      inFlightSegments.clear();
+    };
+  }, []);
 
   const startDirectorStream = async (
     text: string,
@@ -72,6 +298,10 @@ export default function Home() {
     setImageQuotaLimited(false);
     setCacheRuntimeStatus("idle");
     setOutputMode("studio");
+    setSegmentOverrides({});
+    setVideoClips({});
+    generationEpochRef.current += 1;
+    inFlightSegmentsRef.current.clear();
     requestAnimationFrame(() => {
       outputSectionRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
     });
@@ -317,7 +547,20 @@ export default function Home() {
       const response = await fetch("/api/cache", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ songId: currentSongId, directorLines }),
+        body: JSON.stringify({
+          songId: currentSongId,
+          directorLines,
+          videoClips: Object.values(videoClips)
+            .filter((clip) => clip.status === "ready" && (clip.videoBase64 || clip.videoUri))
+            .map((clip) => ({
+              segmentId: clip.segmentId,
+              clipStart: clip.clipStart,
+              clipEnd: clip.clipEnd,
+              mimeType: clip.mimeType || "video/mp4",
+              videoBase64: clip.videoBase64,
+              videoUri: clip.videoUri,
+            })),
+        }),
       });
 
       if (!response.ok) {
@@ -333,6 +576,35 @@ export default function Home() {
       setIsSavingCache(false);
     }
   };
+
+  const handleToggleSegmentMedia = useCallback((segmentId: string) => {
+    const targetSegment = mediaSegments.find((segment) => segment.id === segmentId);
+    if (!targetSegment) return;
+
+    const currentType = segmentOverrides[segmentId] ?? targetSegment.mediaType;
+    const nextType: SegmentMediaType = currentType === "video" ? "image" : "video";
+
+    setSegmentOverrides((prev) => ({
+      ...prev,
+      [segmentId]: nextType,
+    }));
+
+    setVideoClips((prev) => {
+      if (nextType !== "video") {
+        return prev;
+      }
+
+      return {
+        ...prev,
+        [segmentId]: {
+          segmentId,
+          clipStart: targetSegment.startTime,
+          clipEnd: targetSegment.endTime,
+          status: "queued",
+        },
+      };
+    });
+  }, [mediaSegments, segmentOverrides]);
 
   return (
     <main className="min-h-screen bg-background text-foreground selection:bg-primary selection:text-black">
@@ -512,6 +784,9 @@ export default function Home() {
                 <LyricSheet
                   lines={hearsayResults}
                   currentTime={currentTime}
+                  mediaSegments={mediaSegments}
+                  videoClips={videoClips}
+                  onToggleSegmentMedia={handleToggleSegmentMedia}
                 />
               </div>
             )}
@@ -530,6 +805,8 @@ export default function Home() {
                 saveSuccess={saveSuccess}
                 currentSongId={currentSongId}
                 visualsRateLimited={imageQuotaLimited}
+                mediaSegments={mediaSegments}
+                videoClips={videoClips}
               />
             )}
           </motion.div>

@@ -18,6 +18,7 @@ import { DirectorLine } from "@/app/api/director/route";
 import { isCacheableSongId } from "@/lib/cache";
 import { cn } from "@/lib/utils";
 import Image from "next/image";
+import { type MediaSegment, resolveActiveSegment, type VideoClipAsset } from "@/lib/media-segments";
 
 interface PerformViewProps {
   results: HearsayLine[];
@@ -32,6 +33,8 @@ interface PerformViewProps {
   saveSuccess: boolean;
   currentSongId?: string;
   visualsRateLimited?: boolean;
+  mediaSegments?: MediaSegment[];
+  videoClips?: Record<string, VideoClipAsset>;
 }
 
 export default function PerformView({
@@ -46,6 +49,8 @@ export default function PerformView({
   saveSuccess,
   currentSongId,
   visualsRateLimited = false,
+  mediaSegments = [],
+  videoClips = {},
 }: PerformViewProps) {
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
@@ -87,6 +92,24 @@ export default function PerformView({
     if (activeIndex < 0) return undefined;
     return directorLines[activeIndex] ?? directorLines.find((line) => line.chinese === activeLine?.chinese);
   }, [directorLines, activeIndex, activeLine?.chinese]);
+
+  const activeSegment = useMemo(
+    () => resolveActiveSegment(mediaSegments, currentTime),
+    [mediaSegments, currentTime]
+  );
+
+  const activeVideoClip = useMemo(() => {
+    if (!activeSegment || activeSegment.mediaType !== "video") return undefined;
+    return videoClips[activeSegment.id];
+  }, [activeSegment, videoClips]);
+
+  const activeVideoSrc = useMemo(() => {
+    if (!activeVideoClip || activeVideoClip.status !== "ready") return undefined;
+    if (activeVideoClip.videoBase64) {
+      return `data:${activeVideoClip.mimeType || "video/mp4"};base64,${activeVideoClip.videoBase64}`;
+    }
+    return activeVideoClip.videoUri;
+  }, [activeVideoClip]);
 
   const handleTogglePlay = useCallback(() => {
     if (!audioRef.current) return;
@@ -154,14 +177,23 @@ export default function PerformView({
           <div className="relative overflow-hidden rounded-2xl border border-white/10 bg-black min-h-[560px]">
             <AnimatePresence mode="wait">
               <motion.div
-                key={activeDirectorLine?.chinese || "fallback"}
+                key={activeVideoSrc ? `video-${activeSegment?.id}` : activeDirectorLine?.chinese || "fallback"}
                 initial={{ opacity: 0 }}
                 animate={{ opacity: 1 }}
                 exit={{ opacity: 0 }}
                 transition={{ duration: 0.35 }}
                 className="absolute inset-0"
               >
-                {activeDirectorLine?.imageBase64 ? (
+                {activeVideoSrc ? (
+                  <video
+                    src={activeVideoSrc}
+                    autoPlay
+                    muted
+                    playsInline
+                    loop
+                    className="h-full w-full object-cover"
+                  />
+                ) : activeDirectorLine?.imageBase64 ? (
                   <Image
                     src={`data:${activeDirectorLine.imageMimeType || "image/png"};base64,${activeDirectorLine.imageBase64}`}
                     alt="Generated scene"
@@ -177,6 +209,12 @@ export default function PerformView({
 
             <div className="absolute inset-0 bg-gradient-to-b from-black/10 via-transparent to-black/55" />
             <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_center,rgba(0,0,0,0.04)_0%,rgba(0,0,0,0.24)_78%)]" />
+
+            {activeSegment?.mediaType === "video" && !activeVideoSrc && (
+              <div className="absolute left-4 top-4 z-20 rounded-full border border-white/20 bg-black/50 px-3 py-1 text-[11px] font-mono uppercase tracking-wider text-white/70">
+                Video syncing... using image fallback
+              </div>
+            )}
 
             <div className="relative z-10 flex min-h-[560px] flex-col p-6 sm:p-8">
               <div className="mt-auto mx-auto w-full max-w-4xl space-y-3 pb-1">

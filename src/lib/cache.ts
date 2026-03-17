@@ -1,5 +1,19 @@
 import type { DirectorLine } from "@/app/api/director/route";
 
+export interface CachedVideoClip {
+  // Legacy shape
+  verseIndex?: number;
+
+  // Segment-aware shape
+  segmentId?: string;
+  clipStart?: number;
+  clipEnd?: number;
+
+  mimeType: string;
+  videoBase64?: string;
+  videoUri?: string;
+}
+
 const CACHEABLE_SONG_IDS = ["love-confession"] as const;
 
 export type CacheableSongId = (typeof CACHEABLE_SONG_IDS)[number];
@@ -16,11 +30,7 @@ export function isCacheMode(value: unknown): value is CacheMode {
 export interface CachedSongAssets {
   songId: string;
   directorLines: DirectorLine[];
-  videoClips?: {
-    verseIndex: number;
-    videoBase64: string;
-    mimeType: string;
-  }[];
+  videoClips?: CachedVideoClip[];
   generatedAt: string;
 }
 
@@ -60,7 +70,7 @@ export async function hasCachedAssets(songId: string): Promise<boolean> {
 export function exportAssetsForCache(
   songId: string,
   directorLines: DirectorLine[],
-  videoClips?: { verseIndex: number; videoBase64: string; mimeType: string }[]
+  videoClips?: CachedVideoClip[]
 ): string {
   const cacheData: CachedSongAssets = {
     songId,
