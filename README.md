@@ -193,7 +193,7 @@ Expected when complete:
 1. Open app at http://localhost:3000.
 2. Select `告白氣球 (Love Confession)` from Hit Singles.
 3. Keep cache toggle ON.
-4. Click Direct Scene.
+4. Click "Direct MV".
  5. Confirm output appears in Studio, then switch to Perform.
 6. Press Play and verify lyric progression + background visuals.
 
