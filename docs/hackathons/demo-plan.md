@@ -1,39 +1,81 @@
-# Hearsay Lyrics: 1-Minute Live Demo Plan
+# Hearsay Lyrics: 3-4 Minute Live Demo Flow
 
-## ⏱️ Demo Flow: "The Ultimate KTV Hack"
+## Demo Goal
+Show that Hearsay Lyrics turns Mandarin songs into a singable, inclusive karaoke experience for non-Chinese speakers using live AI generation, personalization, synchronized playback, and multimedia staging.
 
-### **[0:00 - 0:10] The Hook & Generation (10s)**
-* **Spoken:** *"Non-Chinese speakers always feel left out at KTV. Let's fix that. I'm going to paste in Jay Chou's 'Dao Xiang' and instantly generate singable English 'hearsay' lyrics."*
-* **Action:** 
-  * Paste a popular Mandarin song's lyrics into the input.
-  * Hit **Generate**.
-  * Point out the background **Image Slideshow** that instantly generates to match the lyric's vibe as the text appears.
+## Pitch and Motivation (Use in Opening)
+- Problem: Non-Chinese speakers love C-pop but cannot confidently sing along at KTV.
+- Gap: Literal translation helps reading, but not singing because rhythm and sound do not transfer.
+- Solution: Hearsay Lyrics generates English lines that preserve Mandarin sound and singability, then stages them in a performance-ready karaoke flow.
 
-### **[0:10 - 0:25] Personalization & AI Control (15s)**
-* **Spoken:** *"You have full control over how you want to sound. We can make it strictly phonetic, or deeply hilarious using our custom slider. And if the AI gets it wrong? You can tweak it instantly."*
-* **Action:**
-  * Quickly drag the **Faithful ↔ Hilarious slider** to show the text completely change styles.
-  * Click to **cycle through alternative options** via the ↺ button.
-  * Pick a line, open the **AI Refine** prompt ("make this sound cooler"), and show it update.
-  * Quickly do a **Manual Edit** to prove users have absolute control over the final output.
+## Timed Run of Show (3:30 Target)
 
-### **[0:25 - 0:45] The "Magic" Audio Sync (20s)**
-* **Spoken:** *"Now for the magic. Normally you need an LRC file for karaoke... but with our Experimental AI Sync, you just drop in the audio track, and Gemini figures out the timestamps purely by listening."*
-* **Action:**
-  * Upload purely the raw MP3 audio track (skip the LRC upload to show off the AI).
-  * Click the **"Magic Sync" button**.
-  * **Hit Play**. Let the judges see and hear the English highlights perfectly tracking the original Chinese audio in real-time. 
+### 0:00-0:25 | Hook
+- Spoken:
+  - "KTV is social, but language barriers leave many people behind."
+  - "Hearsay Lyrics helps anyone sing Mandarin songs using English lines that sound right when sung."
+- Action:
+  - Keep hero + input visible.
+  - Show one short Mandarin lyric snippet to frame the problem.
 
-### **[0:45 - 1:00] The Grand Finale: Immersive Visuals (15s)**
-* **Spoken:** *"To complete the KTV experience, we go beyond just static images. Based on the emotional arc of these lyrics, we generate a cohesive video backdrop, turning an opaque Chinese track into an immersive, personalized English karaoke session anyone can join."*
-* **Action:**
-  * Toggle the background from the image slideshow to the **AI Video Generation** mode.
-  * Show the synced lyrics playing over a beautiful, AI-generated moving backdrop.
-  * Wrap up as the song plays out.
+### 0:25-0:45 | Why Existing Tools Fail
+- Spoken:
+  - "Translation apps optimize for meaning. Karaoke needs timing and phonetic feel."
+  - "We optimize for singability first, while still showing pinyin and meaning for context."
+- Action:
+  - Point to line structure: Chinese, pinyin, hearsay line, meaning.
 
-***
+### 0:45-1:30 | Any-Song Live Generation
+- Spoken:
+  - "This is not catalog-only. I can paste any Mandarin lyrics and generate live."
+  - "Results stream line-by-line so the user gets feedback immediately."
+- Action:
+  - Paste non-catalog Mandarin lyrics.
+  - Trigger generation.
+  - Highlight progressive output updates.
 
-### 💡 Tips for Live Execution:
-* **Pre-load the heavy lifting:** If the video/image generation takes a while, have the assets cached or switch to a "pre-baked" tab for that specific 15-second visual segment to avoid awkward loading pauses.
-* **Keep the mouse moving:** During the "Personalization" phase, have your cursor deliberately highlighting the sliders and buttons you are talking about.
-* **No dead air:** The 20-second Audio Sync portion is your strongest technical flex—let the audio play clearly while you explain the *AI Magic Sync* in the background.
+### 1:30-2:10 | Personalization and Control
+- Spoken:
+  - "Users can choose tone from faithful to playful, then refine per line."
+  - "This is a creative workflow, not one-shot output."
+- Action:
+  - Adjust Faithful-to-Funny slider.
+  - Cycle one line variant.
+  - Run one refine action.
+  - Optionally edit one line manually.
+
+### 2:10-2:55 | Presenter Playback
+- Spoken:
+  - "Studio is for creation. Presenter is for performance."
+  - "Now we switch to synced playback and stage mode."
+- Action:
+  - Switch output area to Presenter mode.
+  - Start playback on a stable cached path (Love Confession recommended).
+  - Let judges see timed lyric progression with visuals.
+
+### 2:55-3:25 | Multimedia Wow Moment
+- Spoken:
+  - "We can stage this as a mini production with generated visuals and optional video."
+  - "This turns lyric generation into an immersive social music experience."
+- Action:
+  - Open storyboard/slideshow, then show video status/result if ready.
+
+### 3:25-3:45 | Close
+- Spoken:
+  - "Hearsay Lyrics translates singability, not just words."
+  - "It makes C-pop participation inclusive, fun, and performance-ready for everyone."
+
+## Key Features to Name Explicitly
+- Any-song Mandarin lyrics input.
+- Progressive line-by-line hearsay generation.
+- Pinyin plus meaning support.
+- Faithful-to-Funny personalization.
+- Per-line variant, refine, and manual edit loop.
+- Studio mode for generation and editing.
+- Presenter mode for synced playback.
+- AI visual backdrops and optional video clip pipeline.
+
+## Reliability and Backup Plan
+- Default to cache-backed Love Confession path for deterministic timing.
+- If live generation is slow, keep the narrative and shorten the generation segment.
+- Always preserve the core arc: problem -> generation -> personalization -> performance -> impact.
