@@ -12,6 +12,24 @@ function clamp(value: number, min: number, max: number): number {
   return Math.max(min, Math.min(max, value));
 }
 
+function toSupportedVeoDuration(requestedSeconds: number): number {
+  const supportedDurations = [4, 6, 8] as const;
+  let best: number = supportedDurations[0];
+  for (const candidate of supportedDurations) {
+    const bestDelta = Math.abs(best - requestedSeconds);
+    const candidateDelta = Math.abs(candidate - requestedSeconds);
+    if (candidateDelta < bestDelta) {
+      best = candidate;
+      continue;
+    }
+    // Prefer shorter clip for equal distance to reduce latency/quota pressure.
+    if (candidateDelta === bestDelta) {
+      best = Math.min(best, candidate);
+    }
+  }
+  return best;
+}
+
 async function getAccessToken(): Promise<string> {
   const keyJson = process.env.GCP_SERVICE_ACCOUNT_JSON;
   if (!keyJson) throw new Error("GCP_SERVICE_ACCOUNT_JSON env var is not set");
@@ -44,7 +62,12 @@ export async function POST(req: Request) {
         return NextResponse.json({ error: "Segment has no hearsay lines" }, { status: 400 });
       }
 
-      durationSeconds = clamp(Math.round(segment.durationSeconds || (segment.endTime - segment.startTime)), 4, 8);
+      const requestedSeconds = clamp(
+        Math.round(segment.durationSeconds || (segment.endTime - segment.startTime)),
+        4,
+        8
+      );
+      durationSeconds = toSupportedVeoDuration(requestedSeconds);
       const paletteHint = segment.palette?.length ? `Palette: ${segment.palette.join(", ")}.` : "";
       const moodHint = segment.mood ? `Mood: ${segment.mood}.` : "";
 

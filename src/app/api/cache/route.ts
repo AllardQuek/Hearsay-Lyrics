@@ -1,10 +1,28 @@
 import { NextResponse } from "next/server";
 import { promises as fs } from "node:fs";
 import path from "node:path";
-import { exportAssetsForCache, isCacheableSongId, type CachedVideoClip } from "@/lib/cache";
+import {
+  exportAssetsForCache,
+  isCacheableSongId,
+  type CachedSongAssets,
+  type CachedVideoClip,
+} from "@/lib/cache";
+import type { SegmentMediaType } from "@/lib/media-segments";
 import type { DirectorLine } from "@/app/api/director/route";
 
 const CACHE_DIR = path.join(process.cwd(), "public", "cache");
+
+async function loadExistingCache(songId: string): Promise<CachedSongAssets | null> {
+  try {
+    const filePath = path.join(CACHE_DIR, `${songId}.json`);
+    const raw = await fs.readFile(filePath, "utf8");
+    const parsed = JSON.parse(raw) as CachedSongAssets;
+    if (!Array.isArray(parsed?.directorLines)) return null;
+    return parsed;
+  } catch {
+    return null;
+  }
+}
 
 function isDirectorLine(value: unknown): value is DirectorLine {
   if (!value || typeof value !== "object") return false;
@@ -14,7 +32,7 @@ function isDirectorLine(value: unknown): value is DirectorLine {
 
 export async function POST(req: Request) {
   try {
-    const { songId, directorLines, videoClips } = await req.json();
+    const { songId, directorLines, videoClips, segmentOverrides } = await req.json();
 
     if (!isCacheableSongId(songId)) {
       return NextResponse.json(
@@ -47,11 +65,38 @@ export async function POST(req: Request) {
           }))
       : [];
 
+    const normalizedSegmentOverrides: Record<string, SegmentMediaType> =
+      segmentOverrides && typeof segmentOverrides === "object"
+        ? Object.entries(segmentOverrides as Record<string, unknown>).reduce<Record<string, SegmentMediaType>>(
+            (acc, [segmentId, mediaType]) => {
+              if (mediaType === "image" || mediaType === "video") {
+                acc[segmentId] = mediaType;
+              }
+              return acc;
+            },
+            {}
+          )
+        : {};
+
+    const existingCache = await loadExistingCache(songId);
+    const preservedVideoClips: CachedVideoClip[] =
+      normalizedVideoClips.length > 0
+        ? normalizedVideoClips
+        : Array.isArray(existingCache?.videoClips)
+          ? existingCache.videoClips
+          : [];
+    const preservedSegmentOverrides: Record<string, SegmentMediaType> =
+      Object.keys(normalizedSegmentOverrides).length > 0
+        ? normalizedSegmentOverrides
+        : existingCache?.segmentOverrides && typeof existingCache.segmentOverrides === "object"
+          ? existingCache.segmentOverrides
+          : {};
+
     const filePath = path.join(CACHE_DIR, `${songId}.json`);
     await fs.mkdir(CACHE_DIR, { recursive: true });
     await fs.writeFile(
       filePath,
-      exportAssetsForCache(songId, normalizedLines, normalizedVideoClips),
+      exportAssetsForCache(songId, normalizedLines, preservedVideoClips, preservedSegmentOverrides),
       "utf8"
     );
 
@@ -59,7 +104,7 @@ export async function POST(req: Request) {
       ok: true,
       songId,
       lineCount: normalizedLines.length,
-      videoClipCount: normalizedVideoClips.length,
+      videoClipCount: preservedVideoClips.length,
     });
   } catch (error) {
     console.error("[cache] Failed to save cache:", error);

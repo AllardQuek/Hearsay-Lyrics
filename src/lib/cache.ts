@@ -1,4 +1,5 @@
 import type { DirectorLine } from "@/app/api/director/route";
+import type { SegmentMediaType } from "@/lib/media-segments";
 
 export interface CachedVideoClip {
   // Legacy shape
@@ -31,6 +32,7 @@ export interface CachedSongAssets {
   songId: string;
   directorLines: DirectorLine[];
   videoClips?: CachedVideoClip[];
+  segmentOverrides?: Record<string, SegmentMediaType>;
   generatedAt: string;
 }
 
@@ -70,12 +72,14 @@ export async function hasCachedAssets(songId: string): Promise<boolean> {
 export function exportAssetsForCache(
   songId: string,
   directorLines: DirectorLine[],
-  videoClips?: CachedVideoClip[]
+  videoClips?: CachedVideoClip[],
+  segmentOverrides?: Record<string, SegmentMediaType>
 ): string {
   const cacheData: CachedSongAssets = {
     songId,
     directorLines,
     videoClips,
+    segmentOverrides,
     generatedAt: new Date().toISOString(),
   };
   

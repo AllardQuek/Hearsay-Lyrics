@@ -4,6 +4,14 @@ type TimedHearsayLine = HearsayLine & { endTime?: number };
 
 export type SegmentMediaType = "image" | "video";
 
+export type LineMediaStatusType = "covered-by-video" | "image-ready" | "image-recovering" | "image-failed";
+
+export interface LineMediaStatus {
+  status: LineMediaStatusType;
+  message?: string;
+  isRateLimit?: boolean;
+}
+
 export type VideoClipStatus = "queued" | "generating" | "ready" | "failed";
 
 export interface MediaSegment {
@@ -52,6 +60,7 @@ interface BuildSegmentOptions {
   maxVideoSegments?: number;
   defaultLineSeconds?: number;
   overrides?: Record<string, SegmentMediaType>;
+  singleLineSegments?: boolean;
 }
 
 const DEFAULT_TARGET_SECONDS = 4;
@@ -139,6 +148,26 @@ function buildInitialSegments(timedLines: TimedLine[], lines: TimedHearsayLine[]
   return segments;
 }
 
+function buildSingleLineSegments(timedLines: TimedLine[], lines: TimedHearsayLine[]): MediaSegment[] {
+  if (timedLines.length === 0) return [];
+
+  return timedLines.map((timedLine, index) => {
+    const promptText = getHearsayText(lines[timedLine.index]);
+    const durationSeconds = Math.max(0.5, timedLine.endTime - timedLine.startTime);
+
+    return {
+      id: `seg-${index + 1}`,
+      startTime: timedLine.startTime,
+      endTime: timedLine.endTime,
+      durationSeconds,
+      lineIndices: [timedLine.index],
+      mediaType: "image",
+      promptText,
+      reason: "default-image",
+    };
+  });
+}
+
 function scoreSegmentForVideo(segment: MediaSegment, lines: TimedHearsayLine[]): number {
   const textScore = segment.lineIndices.reduce((sum, idx) => sum + getHearsayText(lines[idx]).length, 0);
   const durationWeight = 1 - Math.abs(segment.durationSeconds - DEFAULT_TARGET_SECONDS) / DEFAULT_TARGET_SECONDS;
@@ -153,9 +182,12 @@ export function buildMediaSegments(lines: TimedHearsayLine[], options: BuildSegm
   const maxVideoSegments = Math.max(minVideoSegments, options.maxVideoSegments ?? 3);
   const defaultLineSeconds = options.defaultLineSeconds ?? DEFAULT_LINE_SECONDS;
   const overrides = options.overrides ?? {};
+  const singleLineSegments = options.singleLineSegments === true;
 
   const timedLines = buildTimedLines(lines, defaultLineSeconds);
-  const segments = buildInitialSegments(timedLines, lines, targetSeconds);
+  const segments = singleLineSegments
+    ? buildSingleLineSegments(timedLines, lines)
+    : buildInitialSegments(timedLines, lines, targetSeconds);
   if (segments.length === 0) return [];
 
   const sorted = [...segments]
@@ -164,7 +196,7 @@ export function buildMediaSegments(lines: TimedHearsayLine[], options: BuildSegm
       score: scoreSegmentForVideo(segment, lines),
       duration: segment.durationSeconds,
     }))
-    .filter((item) => item.duration >= 2 && item.duration <= 8)
+    .filter((item) => item.duration >= 0.5 && item.duration <= 8)
     .sort((a, b) => b.score - a.score);
 
   const selectedVideoIndices = new Set<number>();

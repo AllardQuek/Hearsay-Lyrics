@@ -14,7 +14,7 @@ const outfit = Outfit({
 
 export const metadata: Metadata = {
   title: "Hearsay Lyrics | Sing C-Pop in English",
-  description: "Sing your favourite Mandarin songs using English lyrics that sound just like Chinese.",
+  description: "Hearsay-style, singability-first English lyrics with synced AI text, visuals, and video scenes for cross-cultural karaoke.",
   keywords: ["C-Pop", "Mandarin", "Karaoke", "Lyrics", "Hearsay", "Gemini AI"],
 };
 

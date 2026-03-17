@@ -15,6 +15,7 @@ import { isCacheableSongId, type CacheMode } from "@/lib/cache";
 import { formatHearsayForClipboard } from "@/lib/utils";
 import {
   buildMediaSegments,
+  type LineMediaStatus,
   type MediaSegment,
   type SegmentMediaType,
   type VideoClipAsset,
@@ -44,6 +45,10 @@ function wait(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+function isRateLimitMessage(message: string): boolean {
+  return /rate limit|quota|resource exhausted|429/i.test(message);
+}
+
 export default function Home() {
   const [hearsayResults, setHearsayResults] = useState<HearsayLine[]>([]);
   const [directorLines, setDirectorLines] = useState<DirectorLine[]>([]);
@@ -62,9 +67,14 @@ export default function Home() {
   const [outputMode, setOutputMode] = useState<"studio" | "perform">("studio");
   const [segmentOverrides, setSegmentOverrides] = useState<Record<string, SegmentMediaType>>({});
   const [videoClips, setVideoClips] = useState<Record<string, VideoClipAsset>>({});
+  const [lineMediaStatuses, setLineMediaStatuses] = useState<Record<number, LineMediaStatus>>({});
+  const [showStudioDiagnostics, setShowStudioDiagnostics] = useState(false);
   const abortControllerRef = useRef<AbortController | null>(null);
   const outputSectionRef = useRef<HTMLDivElement | null>(null);
   const inFlightSegmentsRef = useRef<Set<string>>(new Set());
+  const inFlightImageRecoveryRef = useRef<Set<number>>(new Set());
+  const attemptedImageRecoveryRef = useRef<Set<number>>(new Set());
+  const autoCacheSignatureRef = useRef("");
   const generationEpochRef = useRef(0);
 
   const isStudioMode = outputMode === "studio";
@@ -78,10 +88,19 @@ export default function Home() {
       targetSeconds: 4,
       minVideoSegments: 1,
       maxVideoSegments: 3,
+      singleLineSegments: true,
       overrides: segmentOverrides,
     }),
     [hearsayResults, segmentOverrides]
   );
+
+  const lineMediaSummary = useMemo(() => {
+    const statuses = Object.values(lineMediaStatuses);
+    return {
+      recoveringCount: statuses.filter((item) => item.status === "image-recovering").length,
+      failedCount: statuses.filter((item) => item.status === "image-failed").length,
+    };
+  }, [lineMediaStatuses]);
 
   const startSegmentVideoGeneration = useCallback(
     async (segment: MediaSegment, epoch: number) => {
@@ -257,6 +276,113 @@ export default function Home() {
     [directorLines, hearsayResults]
   );
 
+  const recoverLineImage = useCallback(
+    async (lineIndex: number, epoch: number) => {
+      const hearsayText = hearsayResults[lineIndex]?.candidates?.[0]?.text?.trim();
+      if (!hearsayText) {
+        inFlightImageRecoveryRef.current.delete(lineIndex);
+        setLineMediaStatuses((prev) => ({
+          ...prev,
+          [lineIndex]: {
+            status: "image-failed",
+            message: "No hearsay text available for image generation.",
+          },
+        }));
+        return;
+      }
+
+      try {
+        const response = await fetch("/api/imagine", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ hearsayText }),
+        });
+
+        const payload = (await response.json().catch(() => null)) as
+          | { imageBase64?: string; mimeType?: string; error?: string; isRateLimit?: boolean }
+          | null;
+
+        if (!response.ok || !payload?.imageBase64) {
+          const message = payload?.error || "Image regeneration failed";
+          const isRateLimit = payload?.isRateLimit === true || isRateLimitMessage(message);
+          throw Object.assign(new Error(message), { isRateLimit });
+        }
+
+        if (generationEpochRef.current !== epoch) {
+          return;
+        }
+
+        const mimeType = payload.mimeType || "image/png";
+
+        setDirectorLines((prev) => {
+          if (!prev[lineIndex]) return prev;
+          const next = [...prev];
+          next[lineIndex] = {
+            ...next[lineIndex],
+            imageBase64: payload.imageBase64,
+            imageMimeType: mimeType,
+            imageRateLimited: false,
+            imageError: undefined,
+          };
+          return next;
+        });
+
+        setHearsayResults((prev) => {
+          if (!prev[lineIndex]) return prev;
+          const next = [...prev];
+          next[lineIndex] = {
+            ...next[lineIndex],
+            imageUrl: `data:${mimeType};base64,${payload.imageBase64}`,
+          };
+          return next;
+        });
+
+        setLineMediaStatuses((prev) => ({
+          ...prev,
+          [lineIndex]: { status: "image-ready" },
+        }));
+      } catch (error) {
+        if (generationEpochRef.current !== epoch) {
+          return;
+        }
+
+        const message = error instanceof Error ? error.message : "Image regeneration failed";
+        const isRateLimit =
+          typeof error === "object" &&
+          error !== null &&
+          "isRateLimit" in error &&
+          (error as { isRateLimit?: boolean }).isRateLimit === true;
+
+        if (isRateLimit) {
+          setImageQuotaLimited(true);
+        }
+
+        setDirectorLines((prev) => {
+          if (!prev[lineIndex]) return prev;
+          const next = [...prev];
+          next[lineIndex] = {
+            ...next[lineIndex],
+            imageRateLimited: isRateLimit,
+            imageError: message,
+          };
+          return next;
+        });
+
+        setLineMediaStatuses((prev) => ({
+          ...prev,
+          [lineIndex]: {
+            status: "image-failed",
+            message,
+            isRateLimit,
+          },
+        }));
+      } finally {
+        inFlightImageRecoveryRef.current.delete(lineIndex);
+      }
+    },
+    [hearsayResults]
+  );
+
   useEffect(() => {
     if (directorPhase !== "complete" || mediaSegments.length === 0) return;
 
@@ -273,10 +399,88 @@ export default function Home() {
   }, [directorPhase, mediaSegments, startSegmentVideoGeneration, videoClips]);
 
   useEffect(() => {
+    if (directorPhase !== "complete" || hearsayResults.length === 0) return;
+
+    const lineToSegment = new Map<number, MediaSegment>();
+    for (const segment of mediaSegments) {
+      for (const lineIndex of segment.lineIndices) {
+        lineToSegment.set(lineIndex, segment);
+      }
+    }
+
+    const nextStatuses: Record<number, LineMediaStatus> = {};
+    const recoveryQueue: number[] = [];
+
+    for (let lineIndex = 0; lineIndex < hearsayResults.length; lineIndex++) {
+      const segment = lineToSegment.get(lineIndex);
+      const isCoveredByVideo = segment?.mediaType === "video";
+
+      if (isCoveredByVideo) {
+        nextStatuses[lineIndex] = { status: "covered-by-video" };
+        continue;
+      }
+
+      const hasImage = Boolean(directorLines[lineIndex]?.imageBase64 || hearsayResults[lineIndex]?.imageUrl);
+      if (hasImage) {
+        nextStatuses[lineIndex] = { status: "image-ready" };
+        continue;
+      }
+
+      if (inFlightImageRecoveryRef.current.has(lineIndex)) {
+        nextStatuses[lineIndex] = { status: "image-recovering" };
+        continue;
+      }
+
+      if (attemptedImageRecoveryRef.current.has(lineIndex)) {
+        const message = directorLines[lineIndex]?.imageError || "Image generation failed for this line.";
+        const isRateLimit = directorLines[lineIndex]?.imageRateLimited === true;
+        nextStatuses[lineIndex] = {
+          status: "image-failed",
+          message,
+          isRateLimit,
+        };
+        continue;
+      }
+
+      attemptedImageRecoveryRef.current.add(lineIndex);
+      inFlightImageRecoveryRef.current.add(lineIndex);
+      nextStatuses[lineIndex] = { status: "image-recovering" };
+      recoveryQueue.push(lineIndex);
+    }
+
+    setLineMediaStatuses((prev) => {
+      const prevKeys = Object.keys(prev);
+      const nextKeys = Object.keys(nextStatuses);
+      if (prevKeys.length !== nextKeys.length) return nextStatuses;
+
+      for (const key of nextKeys) {
+        const index = Number(key);
+        const prevStatus = prev[index];
+        const nextStatus = nextStatuses[index];
+
+        if (!prevStatus ||
+          prevStatus.status !== nextStatus.status ||
+          prevStatus.message !== nextStatus.message ||
+          prevStatus.isRateLimit !== nextStatus.isRateLimit) {
+          return nextStatuses;
+        }
+      }
+
+      return prev;
+    });
+
+    for (const lineIndex of recoveryQueue) {
+      void recoverLineImage(lineIndex, generationEpochRef.current);
+    }
+  }, [directorLines, directorPhase, hearsayResults, mediaSegments, recoverLineImage]);
+
+  useEffect(() => {
     const inFlightSegments = inFlightSegmentsRef.current;
+    const inFlightImageRecovery = inFlightImageRecoveryRef.current;
     return () => {
       generationEpochRef.current += 1;
       inFlightSegments.clear();
+      inFlightImageRecovery.clear();
     };
   }, []);
 
@@ -300,8 +504,13 @@ export default function Home() {
     setOutputMode("studio");
     setSegmentOverrides({});
     setVideoClips({});
+    setLineMediaStatuses({});
+    setShowStudioDiagnostics(false);
+    autoCacheSignatureRef.current = "";
     generationEpochRef.current += 1;
     inFlightSegmentsRef.current.clear();
+    inFlightImageRecoveryRef.current.clear();
+    attemptedImageRecoveryRef.current.clear();
     requestAnimationFrame(() => {
       outputSectionRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
     });
@@ -317,6 +526,237 @@ export default function Home() {
         syncIndex.set(key, line.startTime);
       }
     }
+
+    const applyImageUpdate = (payload: Record<string, unknown>) => {
+      const lineIndex = typeof payload.lineIndex === "number" ? payload.lineIndex : undefined;
+      const chinese = typeof payload.chinese === "string" ? payload.chinese : undefined;
+      const imageBase64 = typeof payload.imageBase64 === "string" ? payload.imageBase64 : undefined;
+      const imageMimeType = typeof payload.imageMimeType === "string" ? payload.imageMimeType : "image/png";
+      const imageRateLimited = payload.imageRateLimited === true;
+      const imageError = typeof payload.imageError === "string" ? payload.imageError : undefined;
+
+      if (imageRateLimited) {
+        setImageQuotaLimited(true);
+      }
+
+      setDirectorLines((prev) => {
+        const next = [...prev];
+        const targetIndex =
+          typeof lineIndex === "number" && lineIndex >= 0 && lineIndex < next.length
+            ? lineIndex
+            : chinese
+              ? next.findIndex((line) => line.chinese === chinese)
+              : -1;
+
+        if (targetIndex < 0) return prev;
+
+        next[targetIndex] = {
+          ...next[targetIndex],
+          imageBase64,
+          imageMimeType,
+          imageRateLimited,
+          imageError,
+        };
+
+        return next;
+      });
+
+      setHearsayResults((prev) => {
+        const next = [...prev];
+        const targetIndex =
+          typeof lineIndex === "number" && lineIndex >= 0 && lineIndex < next.length
+            ? lineIndex
+            : chinese
+              ? next.findIndex((line) => line.chinese === chinese)
+              : -1;
+
+        if (targetIndex < 0) return prev;
+
+        next[targetIndex] = {
+          ...next[targetIndex],
+          imageUrl: imageBase64 ? `data:${imageMimeType};base64,${imageBase64}` : next[targetIndex].imageUrl,
+        };
+
+        return next;
+      });
+
+      if (typeof lineIndex === "number" && lineIndex >= 0) {
+        setLineMediaStatuses((prev) => ({
+          ...prev,
+          [lineIndex]: imageBase64
+            ? { status: "image-ready" }
+            : imageError
+              ? { status: "image-failed", message: imageError, isRateLimit: imageRateLimited }
+              : prev[lineIndex] ?? { status: "image-recovering" },
+        }));
+      }
+    };
+
+    const appendDirectorLine = (payload: Record<string, unknown>) => {
+      const chinese =
+        (typeof payload.chinese === "string" && payload.chinese) ||
+        (typeof payload.original === "string" && payload.original) ||
+        "";
+      const pinyin = typeof payload.pinyin === "string" ? payload.pinyin : "";
+      const meaning = typeof payload.meaning === "string" ? payload.meaning : "";
+      const hearsay =
+        (typeof payload.hearsay === "string" && payload.hearsay) ||
+        (typeof payload.misheard === "string" && payload.misheard) ||
+        "";
+
+      // Skip non-line events, e.g., error payloads or malformed chunks.
+      if (!chinese && !hearsay) {
+        return;
+      }
+
+      const imageBase64 = typeof payload.imageBase64 === "string" ? payload.imageBase64 : undefined;
+      const imageMimeType = typeof payload.imageMimeType === "string" ? payload.imageMimeType : undefined;
+      const imageRateLimited = payload.imageRateLimited === true;
+      const imageError = typeof payload.imageError === "string" ? payload.imageError : undefined;
+      const modelStartTime = typeof payload.startTime === "number" ? payload.startTime : undefined;
+      const endTime = typeof payload.endTime === "number" ? payload.endTime : 0;
+      const palette = Array.isArray(payload.palette)
+        ? payload.palette.filter((value): value is string => typeof value === "string")
+        : [];
+
+      if (imageRateLimited) {
+        setImageQuotaLimited(true);
+      }
+
+      const resolvedStartTime =
+        modelStartTime ??
+        syncIndex.get(chinese.trim());
+
+      const directorLine: DirectorLine = {
+        chinese,
+        pinyin,
+        meaning,
+        hearsay,
+        visual: typeof payload.visual === "string" ? payload.visual : "",
+        mood: typeof payload.mood === "string" ? payload.mood : "",
+        palette,
+        imageBase64,
+        imageMimeType,
+        imageRateLimited,
+        imageError,
+        startTime: resolvedStartTime,
+      };
+
+      setDirectorLines((prev) => [...prev, directorLine]);
+      setHearsayResults((prev) => [
+        ...prev,
+        {
+          original: chinese,
+          pinyin,
+          misheard: hearsay,
+          meaning,
+          imageUrl: imageBase64 ? `data:${imageMimeType || "image/png"};base64,${imageBase64}` : undefined,
+          startTime: resolvedStartTime,
+          endTime,
+          chinese,
+          candidates: [{ text: hearsay, phonetic: 1, humor: 1 }],
+        },
+      ]);
+    };
+
+    const handleDirectorRecord = (data: Record<string, unknown>) => {
+      if (data.type === "meta") {
+        setExpectedTotalLines(typeof data.totalLines === "number" ? data.totalLines : 0);
+        setDirectorPhase("visualizing");
+        return;
+      }
+
+      if (data.type === "segment-overrides") {
+        const payload = typeof data.payload === "object" && data.payload
+          ? (data.payload as Record<string, unknown>)
+          : data;
+
+        const rawOverrides = payload.segmentOverrides;
+        if (!rawOverrides || typeof rawOverrides !== "object") {
+          return;
+        }
+
+        const normalizedOverrides = Object.entries(rawOverrides as Record<string, unknown>).reduce<Record<string, SegmentMediaType>>(
+          (acc, [segmentId, mediaType]) => {
+            if (mediaType === "image" || mediaType === "video") {
+              acc[segmentId] = mediaType;
+            }
+            return acc;
+          },
+          {}
+        );
+
+        if (Object.keys(normalizedOverrides).length > 0) {
+          setSegmentOverrides(normalizedOverrides);
+        }
+        return;
+      }
+
+      if (data.type === "video-clips") {
+        const payload = typeof data.payload === "object" && data.payload
+          ? (data.payload as Record<string, unknown>)
+          : data;
+
+        const rawVideoClips = Array.isArray(payload.videoClips)
+          ? payload.videoClips
+          : Array.isArray((data as { videoClips?: unknown[] }).videoClips)
+            ? (data as { videoClips: unknown[] }).videoClips
+            : [];
+
+        if (rawVideoClips.length === 0) {
+          return;
+        }
+
+        setVideoClips((prev) => {
+          const next = { ...prev };
+
+          for (const rawClip of rawVideoClips) {
+            if (!rawClip || typeof rawClip !== "object") continue;
+
+            const clip = rawClip as Record<string, unknown>;
+            const segmentId = typeof clip.segmentId === "string" ? clip.segmentId : undefined;
+            if (!segmentId) continue;
+
+            const clipStart = typeof clip.clipStart === "number" ? clip.clipStart : 0;
+            const clipEnd = typeof clip.clipEnd === "number" ? clip.clipEnd : clipStart;
+            const mimeType = typeof clip.mimeType === "string" ? clip.mimeType : "video/mp4";
+            const videoBase64 = typeof clip.videoBase64 === "string" ? clip.videoBase64 : undefined;
+            const videoUri = typeof clip.videoUri === "string" ? clip.videoUri : undefined;
+
+            if (!videoBase64 && !videoUri) continue;
+
+            next[segmentId] = {
+              segmentId,
+              clipStart,
+              clipEnd,
+              status: "ready",
+              mimeType,
+              videoBase64,
+              videoUri,
+            };
+          }
+
+          return next;
+        });
+        return;
+      }
+
+      if (data.type === "image-update") {
+        const payload = typeof data.payload === "object" && data.payload
+          ? (data.payload as Record<string, unknown>)
+          : data;
+        applyImageUpdate(payload);
+        return;
+      }
+
+      // Accept both legacy envelope format ({ type: "line", ... }) and
+      // raw NDJSON line objects emitted by the current /api/director route.
+      const payload = data.type === "line" && typeof data.payload === "object" && data.payload
+        ? (data.payload as Record<string, unknown>)
+        : data;
+
+      appendDirectorLine(payload);
+    };
 
     try {
       const response = await fetch("/api/director", {
@@ -351,81 +791,7 @@ export default function Home() {
           if (!line.trim()) continue;
           try {
             const data = JSON.parse(line) as Record<string, unknown>;
-            if (data.type === "meta") {
-              setExpectedTotalLines(typeof data.totalLines === "number" ? data.totalLines : 0);
-              setDirectorPhase("visualizing");
-            } else {
-              // Accept both legacy envelope format ({ type: "line", ... }) and
-              // raw NDJSON line objects emitted by the current /api/director route.
-              const payload = data.type === "line" && typeof data.payload === "object" && data.payload
-                ? (data.payload as Record<string, unknown>)
-                : data;
-
-              const chinese =
-                (typeof payload.chinese === "string" && payload.chinese) ||
-                (typeof payload.original === "string" && payload.original) ||
-                "";
-              const pinyin = typeof payload.pinyin === "string" ? payload.pinyin : "";
-              const meaning = typeof payload.meaning === "string" ? payload.meaning : "";
-              const hearsay =
-                (typeof payload.hearsay === "string" && payload.hearsay) ||
-                (typeof payload.misheard === "string" && payload.misheard) ||
-                "";
-
-              // Skip non-line events, e.g., error payloads or malformed chunks.
-              if (!chinese && !hearsay) {
-                continue;
-              }
-
-              const imageBase64 = typeof payload.imageBase64 === "string" ? payload.imageBase64 : undefined;
-              const imageMimeType = typeof payload.imageMimeType === "string" ? payload.imageMimeType : undefined;
-              const imageRateLimited = payload.imageRateLimited === true;
-              const imageError = typeof payload.imageError === "string" ? payload.imageError : undefined;
-              const modelStartTime = typeof payload.startTime === "number" ? payload.startTime : undefined;
-              const endTime = typeof payload.endTime === "number" ? payload.endTime : 0;
-              const palette = Array.isArray(payload.palette)
-                ? payload.palette.filter((value): value is string => typeof value === "string")
-                : [];
-
-              if (imageRateLimited) {
-                setImageQuotaLimited(true);
-              }
-
-              const resolvedStartTime =
-                modelStartTime ??
-                syncIndex.get(chinese.trim());
-
-              const directorLine: DirectorLine = {
-                chinese,
-                pinyin,
-                meaning,
-                hearsay,
-                visual: typeof payload.visual === "string" ? payload.visual : "",
-                mood: typeof payload.mood === "string" ? payload.mood : "",
-                palette,
-                imageBase64,
-                imageMimeType,
-                imageRateLimited,
-                imageError,
-                startTime: resolvedStartTime,
-              };
-
-              setDirectorLines((prev) => [...prev, directorLine]);
-              setHearsayResults((prev) => [
-                ...prev,
-                {
-                  original: chinese,
-                  pinyin,
-                  misheard: hearsay,
-                  meaning,
-                  imageUrl: imageBase64 ? `data:${imageMimeType || "image/png"};base64,${imageBase64}` : undefined,
-                  startTime: resolvedStartTime,
-                  endTime,
-                  chinese,
-                  candidates: [{ text: hearsay, phonetic: 1, humor: 1 }],
-                },
-              ]);
-            }
+            handleDirectorRecord(data);
           } catch (e) {
             console.error("Chunk parse error:", e);
           }
@@ -436,76 +802,7 @@ export default function Home() {
       if (buffer.trim()) {
         try {
           const data = JSON.parse(buffer) as Record<string, unknown>;
-          if (data.type === "meta") {
-            setExpectedTotalLines(typeof data.totalLines === "number" ? data.totalLines : 0);
-            setDirectorPhase("visualizing");
-          } else {
-            const payload = data.type === "line" && typeof data.payload === "object" && data.payload
-              ? (data.payload as Record<string, unknown>)
-              : data;
-
-            const chinese =
-              (typeof payload.chinese === "string" && payload.chinese) ||
-              (typeof payload.original === "string" && payload.original) ||
-              "";
-            const pinyin = typeof payload.pinyin === "string" ? payload.pinyin : "";
-            const meaning = typeof payload.meaning === "string" ? payload.meaning : "";
-            const hearsay =
-              (typeof payload.hearsay === "string" && payload.hearsay) ||
-              (typeof payload.misheard === "string" && payload.misheard) ||
-              "";
-
-            if (chinese || hearsay) {
-              const imageBase64 = typeof payload.imageBase64 === "string" ? payload.imageBase64 : undefined;
-              const imageMimeType = typeof payload.imageMimeType === "string" ? payload.imageMimeType : undefined;
-              const imageRateLimited = payload.imageRateLimited === true;
-              const imageError = typeof payload.imageError === "string" ? payload.imageError : undefined;
-              const modelStartTime = typeof payload.startTime === "number" ? payload.startTime : undefined;
-              const endTime = typeof payload.endTime === "number" ? payload.endTime : 0;
-              const palette = Array.isArray(payload.palette)
-                ? payload.palette.filter((value): value is string => typeof value === "string")
-                : [];
-
-              if (imageRateLimited) {
-                setImageQuotaLimited(true);
-              }
-
-              const resolvedStartTime =
-                modelStartTime ??
-                syncIndex.get(chinese.trim());
-
-              const directorLine: DirectorLine = {
-                chinese,
-                pinyin,
-                meaning,
-                hearsay,
-                visual: typeof payload.visual === "string" ? payload.visual : "",
-                mood: typeof payload.mood === "string" ? payload.mood : "",
-                palette,
-                imageBase64,
-                imageMimeType,
-                imageRateLimited,
-                imageError,
-                startTime: resolvedStartTime,
-              };
-
-              setDirectorLines((prev) => [...prev, directorLine]);
-              setHearsayResults((prev) => [
-                ...prev,
-                {
-                  original: chinese,
-                  pinyin,
-                  misheard: hearsay,
-                  meaning,
-                  imageUrl: imageBase64 ? `data:${imageMimeType || "image/png"};base64,${imageBase64}` : undefined,
-                  startTime: resolvedStartTime,
-                  endTime,
-                  chinese,
-                  candidates: [{ text: hearsay, phonetic: 1, humor: 1 }],
-                },
-              ]);
-            }
-          }
+          handleDirectorRecord(data);
         } catch (e) {
           console.error("Final chunk parse error:", e);
         }
@@ -540,6 +837,11 @@ export default function Home() {
   const handleSaveCache = async () => {
     if (directorLines.length === 0 || isSavingCache || !isCacheableSongId(currentSongId)) return;
 
+    const segmentPlan = mediaSegments.reduce<Record<string, SegmentMediaType>>((acc, segment) => {
+      acc[segment.id] = segment.mediaType;
+      return acc;
+    }, {});
+
     setIsSavingCache(true);
     setSaveSuccess(false);
 
@@ -560,6 +862,7 @@ export default function Home() {
               videoBase64: clip.videoBase64,
               videoUri: clip.videoUri,
             })),
+          segmentOverrides: segmentPlan,
         }),
       });
 
@@ -576,6 +879,82 @@ export default function Home() {
       setIsSavingCache(false);
     }
   };
+
+  useEffect(() => {
+    if (!isCacheableSongId(currentSongId)) return;
+    if (directorPhase !== "complete") return;
+    if (directorLines.length === 0) return;
+
+    const readyClips = Object.values(videoClips)
+      .filter((clip) => clip.status === "ready" && (clip.videoBase64 || clip.videoUri))
+      .map((clip) => ({
+        segmentId: clip.segmentId,
+        clipStart: clip.clipStart,
+        clipEnd: clip.clipEnd,
+        mimeType: clip.mimeType || "video/mp4",
+        videoBase64: clip.videoBase64,
+        videoUri: clip.videoUri,
+      }))
+      .sort((a, b) => a.segmentId.localeCompare(b.segmentId));
+
+    const segmentPlan = mediaSegments.reduce<Record<string, SegmentMediaType>>((acc, segment) => {
+      acc[segment.id] = segment.mediaType;
+      return acc;
+    }, {});
+
+    if (readyClips.length === 0 && Object.keys(segmentPlan).length === 0) return;
+
+    const signature = JSON.stringify({
+      songId: currentSongId,
+      lineCount: directorLines.length,
+      segmentPlan,
+      clips: readyClips.map((clip) => ({
+        segmentId: clip.segmentId,
+        hasBase64: Boolean(clip.videoBase64),
+        hasUri: Boolean(clip.videoUri),
+      })),
+    });
+
+    if (autoCacheSignatureRef.current === signature) return;
+    autoCacheSignatureRef.current = signature;
+
+    let cancelled = false;
+
+    const persistCache = async () => {
+      try {
+        const response = await fetch("/api/cache", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            songId: currentSongId,
+            directorLines,
+            videoClips: readyClips,
+            segmentOverrides: segmentPlan,
+          }),
+        });
+
+        if (!response.ok) {
+          const payload = (await response.json().catch(() => null)) as { error?: string } | null;
+          throw new Error(payload?.error || "Failed to auto-save cache");
+        }
+
+        if (!cancelled) {
+          setCacheRuntimeStatus("manual-update");
+        }
+      } catch (error) {
+        console.error("[cache] Failed to auto-persist cache:", error);
+        if (!cancelled) {
+          autoCacheSignatureRef.current = "";
+        }
+      }
+    };
+
+    void persistCache();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [currentSongId, directorLines, directorPhase, mediaSegments, videoClips]);
 
   const handleToggleSegmentMedia = useCallback((segmentId: string) => {
     const targetSegment = mediaSegments.find((segment) => segment.id === segmentId);
@@ -670,12 +1049,11 @@ export default function Home() {
               </div>
 
               <h1 className="text-5xl font-display font-bold tracking-tight text-white leading-[1.1] sm:text-6xl lg:text-7xl w-full max-w-4xl">
-                Sing Chinese <span className="text-transparent bg-clip-text bg-gradient-to-r from-primary to-accent italic font-serif">Naturally.</span><br />
-                Feel The Flow.
+                Sing Chinese <span className="text-transparent bg-clip-text bg-gradient-to-r from-primary to-accent italic font-serif">In English.</span>
               </h1>
 
               <p className="max-w-2xl text-base text-white/70 leading-relaxed sm:text-lg">
-                We preserve the phonetic resonance and the original meaning, right here in the studio.
+                Hearsay-style, singability-first lyrics plus synced AI visuals and video, so more people can join KTV across cultures.
               </p>
             </div>
 
@@ -755,12 +1133,25 @@ export default function Home() {
                       {expectedTotalLines > 0 ? (
                         <span className="ml-2 opacity-70">{directorLines.length}/{expectedTotalLines}</span>
                       ) : null}
+                      {(imageQuotaLimited || lineMediaSummary.recoveringCount > 0 || lineMediaSummary.failedCount > 0) && (
+                        <>
+                          <button
+                            type="button"
+                            onClick={() => setShowStudioDiagnostics((prev) => !prev)}
+                            className="ml-2 rounded-full border border-white/10 px-2 py-0.5 text-[9px] uppercase tracking-[0.12em] text-white/45 transition-colors hover:border-white/20 hover:text-white/65"
+                          >
+                            Dev
+                          </button>
+                          {showStudioDiagnostics && (
+                            <span className="text-[9px] normal-case tracking-normal text-white/45">
+                              {imageQuotaLimited ? "quota-limited" : "quota-ok"}
+                              {lineMediaSummary.recoveringCount > 0 ? ` · recovering:${lineMediaSummary.recoveringCount}` : ""}
+                              {lineMediaSummary.failedCount > 0 ? ` · failed:${lineMediaSummary.failedCount}` : ""}
+                            </span>
+                          )}
+                        </>
+                      )}
                     </p>
-                    {imageQuotaLimited && (
-                      <p className="text-[10px] font-mono uppercase tracking-wide text-amber-300/90">
-                        Image quota reached: visuals may be missing
-                      </p>
-                    )}
                     {cacheRuntimeStatus !== "idle" && (
                       <p
                         className={cn(
@@ -807,6 +1198,7 @@ export default function Home() {
                 visualsRateLimited={imageQuotaLimited}
                 mediaSegments={mediaSegments}
                 videoClips={videoClips}
+                lineMediaStatuses={lineMediaStatuses}
               />
             )}
           </motion.div>

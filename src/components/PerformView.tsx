@@ -12,13 +12,28 @@ import {
   RotateCcw,
   Volume2,
   VolumeX,
+  Mic2,
+  Sparkles,
 } from "lucide-react";
 import { HearsayLine } from "@/lib/gemini";
 import { DirectorLine } from "@/app/api/director/route";
 import { isCacheableSongId } from "@/lib/cache";
 import { cn } from "@/lib/utils";
 import Image from "next/image";
-import { type MediaSegment, resolveActiveSegment, type VideoClipAsset } from "@/lib/media-segments";
+import {
+  type LineMediaStatus,
+  type MediaSegment,
+  resolveActiveSegment,
+  type VideoClipAsset,
+} from "@/lib/media-segments";
+
+const PRE_SHOW_MESSAGES = [
+  "Mic check complete. Crowd energy at 100%.",
+  "Tonight's mission: sing first, overthink later.",
+  "Main character mode unlocked. Hit play when ready.",
+];
+
+const START_SCREEN_THRESHOLD_SECONDS = 0.2;
 
 interface PerformViewProps {
   results: HearsayLine[];
@@ -35,6 +50,7 @@ interface PerformViewProps {
   visualsRateLimited?: boolean;
   mediaSegments?: MediaSegment[];
   videoClips?: Record<string, VideoClipAsset>;
+  lineMediaStatuses?: Record<number, LineMediaStatus>;
 }
 
 export default function PerformView({
@@ -51,17 +67,23 @@ export default function PerformView({
   visualsRateLimited = false,
   mediaSegments = [],
   videoClips = {},
+  lineMediaStatuses = {},
 }: PerformViewProps) {
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
   const [isPlaying, setIsPlaying] = useState(false);
   const [isMuted, setIsMuted] = useState(false);
+  const [dismissedIntroForKey, setDismissedIntroForKey] = useState<string | null>(null);
+  const [showDiagnostics, setShowDiagnostics] = useState(false);
   const audioRef = useRef<HTMLAudioElement>(null);
 
   const progress = expectedTotalLines > 0 ? (directorLines.length / expectedTotalLines) * 100 : 0;
   const hasAudio = Boolean(audioUrl);
+  const audioSessionKey = audioUrl || "__none__";
+  const introDismissed = dismissedIntroForKey === audioSessionKey;
   const canSaveCache = isCacheableSongId(currentSongId);
   const playbackProgress = duration > 0 ? Math.min((currentTime / duration) * 100, 100) : 0;
+  const isPreShow = hasAudio && !introDismissed && !isPlaying && currentTime <= START_SCREEN_THRESHOLD_SECONDS;
 
   const activeIndex = useMemo(() => {
     const timed = results
@@ -87,11 +109,43 @@ export default function PerformView({
   const activeLine = activeIndex >= 0 ? results[activeIndex] : undefined;
   const previousLine = activeIndex > 0 ? results[activeIndex - 1] : undefined;
   const nextLine = activeIndex >= 0 && activeIndex < results.length - 1 ? results[activeIndex + 1] : undefined;
+  const firstLyric = useMemo(
+    () => results.find((line) => line.candidates?.[0]?.text?.trim())?.candidates?.[0]?.text,
+    [results]
+  );
+  const preShowMessage = useMemo(
+    () => PRE_SHOW_MESSAGES[results.length % PRE_SHOW_MESSAGES.length],
+    [results.length]
+  );
 
   const activeDirectorLine = useMemo(() => {
     if (activeIndex < 0) return undefined;
     return directorLines[activeIndex] ?? directorLines.find((line) => line.chinese === activeLine?.chinese);
   }, [directorLines, activeIndex, activeLine?.chinese]);
+
+  const activeLineMediaStatus = activeIndex >= 0 ? lineMediaStatuses[activeIndex] : undefined;
+
+  const fallbackDirectorLine = useMemo(() => {
+    if (directorLines.length === 0) return undefined;
+    if (activeDirectorLine?.imageBase64) return activeDirectorLine;
+
+    const hasImage = (line?: DirectorLine) => Boolean(line?.imageBase64);
+
+    if (activeIndex >= 0) {
+      for (let offset = 1; offset < directorLines.length; offset++) {
+        const leftIndex = activeIndex - offset;
+        const rightIndex = activeIndex + offset;
+
+        const left = leftIndex >= 0 ? directorLines[leftIndex] : undefined;
+        if (hasImage(left)) return left;
+
+        const right = rightIndex < directorLines.length ? directorLines[rightIndex] : undefined;
+        if (hasImage(right)) return right;
+      }
+    }
+
+    return directorLines.find((line) => hasImage(line));
+  }, [activeDirectorLine, activeIndex, directorLines]);
 
   const activeSegment = useMemo(
     () => resolveActiveSegment(mediaSegments, currentTime),
@@ -111,6 +165,53 @@ export default function PerformView({
     return activeVideoClip.videoUri;
   }, [activeVideoClip]);
 
+  const isUsingNearestImageFallback = Boolean(
+    !activeVideoSrc &&
+      fallbackDirectorLine?.imageBase64 &&
+      activeDirectorLine &&
+      fallbackDirectorLine !== activeDirectorLine
+  );
+
+  const lineFallbackMessage = useMemo(() => {
+    if (isPreShow || !activeSegment) return null;
+
+    if (activeSegment.mediaType === "video") {
+      if (activeVideoClip?.status === "failed") {
+        return activeVideoClip.error || "Video failed for this section. Showing image fallback.";
+      }
+      if (!activeVideoSrc) {
+        return "Video syncing... using image fallback";
+      }
+      return null;
+    }
+
+    if (activeLineMediaStatus?.status === "image-recovering") {
+      return "Generating image for this line...";
+    }
+
+    if (activeLineMediaStatus?.status === "image-failed") {
+      if (fallbackDirectorLine?.imageBase64) {
+        return activeLineMediaStatus.message || "Image failed for this line. Showing nearest generated visual.";
+      }
+      return activeLineMediaStatus.message || "Image failed for this line. No visual available.";
+    }
+
+    if (!activeDirectorLine?.imageBase64 && isUsingNearestImageFallback) {
+      return "Using nearest generated visual for this line.";
+    }
+
+    return null;
+  }, [
+    activeDirectorLine,
+    activeLineMediaStatus,
+    activeSegment,
+    activeVideoClip,
+    activeVideoSrc,
+    fallbackDirectorLine,
+    isPreShow,
+    isUsingNearestImageFallback,
+  ]);
+
   const handleTogglePlay = useCallback(() => {
     if (!audioRef.current) return;
     if (isPlaying) {
@@ -124,6 +225,9 @@ export default function PerformView({
     if (!audioRef.current) return;
     audioRef.current.currentTime = time;
     setCurrentTime(time);
+    if (time <= START_SCREEN_THRESHOLD_SECONDS) {
+      setDismissedIntroForKey(null);
+    }
   }, []);
 
   const formatTime = (time: number) => {
@@ -177,7 +281,7 @@ export default function PerformView({
           <div className="relative overflow-hidden rounded-2xl border border-white/10 bg-black min-h-[560px]">
             <AnimatePresence mode="wait">
               <motion.div
-                key={activeVideoSrc ? `video-${activeSegment?.id}` : activeDirectorLine?.chinese || "fallback"}
+                key={activeVideoSrc ? `video-${activeSegment?.id}` : fallbackDirectorLine?.chinese || "fallback"}
                 initial={{ opacity: 0 }}
                 animate={{ opacity: 1 }}
                 exit={{ opacity: 0 }}
@@ -193,9 +297,9 @@ export default function PerformView({
                     loop
                     className="h-full w-full object-cover"
                   />
-                ) : activeDirectorLine?.imageBase64 ? (
+                ) : fallbackDirectorLine?.imageBase64 ? (
                   <Image
-                    src={`data:${activeDirectorLine.imageMimeType || "image/png"};base64,${activeDirectorLine.imageBase64}`}
+                    src={`data:${fallbackDirectorLine.imageMimeType || "image/png"};base64,${fallbackDirectorLine.imageBase64}`}
                     alt="Generated scene"
                     fill
                     unoptimized
@@ -210,45 +314,105 @@ export default function PerformView({
             <div className="absolute inset-0 bg-gradient-to-b from-black/10 via-transparent to-black/55" />
             <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_center,rgba(0,0,0,0.04)_0%,rgba(0,0,0,0.24)_78%)]" />
 
-            {activeSegment?.mediaType === "video" && !activeVideoSrc && (
+            <AnimatePresence>
+              {isPreShow && (
+                <motion.div
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  exit={{ opacity: 0 }}
+                  className="absolute inset-0 z-20"
+                >
+                  <div className="absolute inset-0 bg-[radial-gradient(circle_at_30%_15%,rgba(245,158,11,0.14),transparent_45%),radial-gradient(circle_at_70%_0%,rgba(244,63,94,0.16),transparent_50%)]" />
+                  <div className="absolute inset-0 bg-black/42 backdrop-blur-[2px]" />
+
+                  <div className="relative flex h-full items-center justify-center px-5 py-8 sm:px-8">
+                    <motion.div
+                      initial={{ y: 12, opacity: 0 }}
+                      animate={{ y: 0, opacity: 1 }}
+                      transition={{ delay: 0.08, duration: 0.42 }}
+                      className="w-full max-w-2xl rounded-[28px] border border-white/18 bg-black/68 px-6 py-7 text-center shadow-[0_30px_70px_rgba(0,0,0,0.55)] backdrop-blur-md sm:px-8"
+                    >
+                      <div className="mx-auto inline-flex items-center gap-2 rounded-full border border-primary/35 bg-primary/12 px-4 py-1.5 text-[11px] font-mono uppercase tracking-[0.2em] text-primary/90">
+                        <Sparkles size={13} />
+                        Pre-Show Hype
+                      </div>
+
+                      <h3 className="mt-4 text-3xl font-display font-bold text-white sm:text-4xl">
+                        Warm up and start singing
+                      </h3>
+                      <p className="mt-2 text-sm text-white/85 sm:text-base">{preShowMessage}</p>
+                      {firstLyric && (
+                        <p className="mt-3 text-base font-semibold text-amber-200/95 sm:text-lg">
+                          First line: {firstLyric}
+                        </p>
+                      )}
+
+                      <div className="mt-6 flex flex-col items-center gap-3">
+                        <button
+                          onClick={() => {
+                            setDismissedIntroForKey(audioSessionKey);
+                            handleTogglePlay();
+                          }}
+                          className="group inline-flex items-center gap-2 rounded-full border border-white/35 bg-white px-6 py-3 text-sm font-semibold text-black shadow-[0_12px_28px_rgba(255,255,255,0.24)] transition-transform hover:scale-[1.02] active:scale-[0.98]"
+                        >
+                          <Mic2 size={16} />
+                          Start Singing
+                          <Play size={15} className="translate-x-0 transition-transform group-hover:translate-x-0.5" />
+                        </button>
+                        <button
+                          onClick={() => setDismissedIntroForKey(audioSessionKey)}
+                          className="text-xs font-mono uppercase tracking-wider text-white/70 transition-colors hover:text-white"
+                        >
+                          Just show me the stage
+                        </button>
+                      </div>
+                    </motion.div>
+                  </div>
+                </motion.div>
+              )}
+            </AnimatePresence>
+
+            {!isPreShow && lineFallbackMessage && (
               <div className="absolute left-4 top-4 z-20 rounded-full border border-white/20 bg-black/50 px-3 py-1 text-[11px] font-mono uppercase tracking-wider text-white/70">
-                Video syncing... using image fallback
+                {lineFallbackMessage}
               </div>
             )}
 
             <div className="relative z-10 flex min-h-[560px] flex-col p-6 sm:p-8">
-              <div className="mt-auto mx-auto w-full max-w-4xl space-y-3 pb-1">
-                {previousLine && (
-                  <p
-                    className="text-center text-sm text-white/70 drop-shadow-[0_3px_12px_rgba(0,0,0,0.75)]"
-                    style={{ textShadow: "0 4px 18px rgba(0, 0, 0, 0.65)" }}
-                  >
-                    {previousLine.candidates?.[0]?.text}
-                  </p>
-                )}
-
-                {activeLine && (
-                  <div className="text-center px-3 sm:px-4 py-1">
-                    <h3
-                      className="text-4xl font-display font-bold leading-tight text-white sm:text-5xl"
-                      style={{ textShadow: "0 12px 34px rgba(0, 0, 0, 0.9)" }}
+              {!isPreShow && (
+                <div className="mt-auto mx-auto w-full max-w-4xl space-y-3 pb-1">
+                  {previousLine && (
+                    <p
+                      className="text-center text-sm text-white/70 drop-shadow-[0_3px_12px_rgba(0,0,0,0.75)]"
+                      style={{ textShadow: "0 4px 18px rgba(0, 0, 0, 0.65)" }}
                     >
-                      {activeLine.candidates?.[0]?.text}
-                    </h3>
-                    <p className="mt-2 text-xl font-semibold text-white/95 drop-shadow-[0_5px_16px_rgba(0,0,0,0.9)] sm:text-2xl">{activeLine.chinese}</p>
-                    <p className="mt-1 text-sm italic text-white/90 drop-shadow-[0_3px_12px_rgba(0,0,0,0.9)]">{activeLine.meaning}</p>
-                  </div>
-                )}
+                      {previousLine.candidates?.[0]?.text}
+                    </p>
+                  )}
 
-                {nextLine && (
-                  <p
-                    className="text-center text-sm text-white/65 drop-shadow-[0_3px_12px_rgba(0,0,0,0.72)]"
-                    style={{ textShadow: "0 4px 16px rgba(0, 0, 0, 0.62)" }}
-                  >
-                    {nextLine.candidates?.[0]?.text}
-                  </p>
-                )}
-              </div>
+                  {activeLine && (
+                    <div className="text-center px-3 sm:px-4 py-1">
+                      <h3
+                        className="text-4xl font-display font-bold leading-tight text-white sm:text-5xl"
+                        style={{ textShadow: "0 12px 34px rgba(0, 0, 0, 0.9)" }}
+                      >
+                        {activeLine.candidates?.[0]?.text}
+                      </h3>
+                      <p className="mt-2 text-xl font-semibold text-white/95 drop-shadow-[0_5px_16px_rgba(0,0,0,0.9)] sm:text-2xl">{activeLine.chinese}</p>
+                      <p className="mt-1 text-sm italic text-white/90 drop-shadow-[0_3px_12px_rgba(0,0,0,0.9)]">{activeLine.meaning}</p>
+                    </div>
+                  )}
+
+                  {nextLine && (
+                    <p
+                      className="text-center text-sm text-white/65 drop-shadow-[0_3px_12px_rgba(0,0,0,0.72)]"
+                      style={{ textShadow: "0 4px 16px rgba(0, 0, 0, 0.62)" }}
+                    >
+                      {nextLine.candidates?.[0]?.text}
+                    </p>
+                  )}
+                </div>
+              )}
             </div>
 
             {!hasAudio && (
@@ -301,12 +465,24 @@ export default function PerformView({
                 >
                   {isSavingCache ? <Loader2 size={18} className="animate-spin" /> : saveSuccess ? <Check size={18} /> : <Save size={18} />}
                 </button>
+                {visualsRateLimited && (
+                  <>
+                    <button
+                      type="button"
+                      onClick={() => setShowDiagnostics((prev) => !prev)}
+                      className="rounded-full border border-white/10 px-2 py-1 text-[9px] font-mono uppercase tracking-[0.12em] text-white/45 transition-colors hover:border-white/20 hover:text-white/65"
+                    >
+                      Dev
+                    </button>
+                    {showDiagnostics && (
+                      <span className="hidden text-[10px] font-mono text-amber-200/70 sm:inline">
+                        quota-limited
+                      </span>
+                    )}
+                  </>
+                )}
               </div>
             </div>
-
-            {visualsRateLimited && (
-              <p className="mb-3 text-xs text-amber-200/90">Image quota reached: some backgrounds unavailable</p>
-            )}
 
             <div className="mb-4 flex items-center gap-3 sm:gap-4">
               <span className="w-12 text-xs font-mono text-white/90">{formatTime(currentTime)}</span>
@@ -365,12 +541,17 @@ export default function PerformView({
               if (!audioRef.current) return;
               setDuration(audioRef.current.duration || 0);
             }}
-            onPlay={() => setIsPlaying(true)}
+            onPlay={() => {
+              setIsPlaying(true);
+              setDismissedIntroForKey(audioSessionKey);
+            }}
             onPause={() => {
               setIsPlaying(false);
             }}
             onEnded={() => {
               setIsPlaying(false);
+              setCurrentTime(0);
+              setDismissedIntroForKey(null);
             }}
           />
         </div>

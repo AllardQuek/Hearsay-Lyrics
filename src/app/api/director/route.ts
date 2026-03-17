@@ -4,6 +4,7 @@ import path from "node:path";
 import { genAI, modelLite, DIRECTOR_PROMPT, safeGenerateContent } from "@/lib/gemini";
 import { getLineLevelPinyin } from "@/lib/pinyin";
 import {
+  type CachedVideoClip,
   exportAssetsForCache,
   isCacheableSongId,
   isCacheMode,
@@ -64,10 +65,35 @@ async function loadDirectorLinesFromCache(songId: string): Promise<DirectorLine[
   }
 }
 
+async function loadCachedAssetsFromCache(songId: string): Promise<CachedSongAssets | null> {
+  try {
+    const filePath = getCacheFilePath(songId);
+    const raw = await fs.readFile(filePath, "utf8");
+    const parsed = JSON.parse(raw) as CachedSongAssets;
+    if (!Array.isArray(parsed?.directorLines)) return null;
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
 async function writeDirectorLinesToCache(songId: string, directorLines: DirectorLine[]): Promise<void> {
+  const existingAssets = await loadCachedAssetsFromCache(songId);
+  const existingVideoClips = Array.isArray(existingAssets?.videoClips)
+    ? existingAssets?.videoClips
+    : undefined;
+  const existingSegmentOverrides =
+    existingAssets?.segmentOverrides && typeof existingAssets.segmentOverrides === "object"
+      ? existingAssets.segmentOverrides
+      : undefined;
+
   const filePath = getCacheFilePath(songId);
   await fs.mkdir(CACHE_DIR, { recursive: true });
-  await fs.writeFile(filePath, exportAssetsForCache(songId, directorLines), "utf8");
+  await fs.writeFile(
+    filePath,
+    exportAssetsForCache(songId, directorLines, existingVideoClips, existingSegmentOverrides),
+    "utf8"
+  );
 }
 
 function streamDirectorLines(directorLines: DirectorLine[]): ReadableStream<Uint8Array> {
@@ -77,6 +103,71 @@ function streamDirectorLines(directorLines: DirectorLine[]): ReadableStream<Uint
       try {
         for (const line of directorLines) {
           controller.enqueue(encoder.encode(JSON.stringify(line) + "\n"));
+        }
+      } finally {
+        controller.close();
+      }
+    },
+  });
+}
+
+function streamCachedAssets(cachedAssets: CachedSongAssets): ReadableStream<Uint8Array> {
+  const encoder = new TextEncoder();
+  const directorLines = cachedAssets.directorLines ?? [];
+  const videoClips: CachedVideoClip[] = Array.isArray(cachedAssets.videoClips)
+    ? cachedAssets.videoClips
+    : [];
+  const segmentOverrides =
+    cachedAssets.segmentOverrides && typeof cachedAssets.segmentOverrides === "object"
+      ? cachedAssets.segmentOverrides
+      : undefined;
+
+  return new ReadableStream({
+    start(controller) {
+      try {
+        controller.enqueue(
+          encoder.encode(
+            JSON.stringify({
+              type: "meta",
+              totalLines: directorLines.length,
+            }) + "\n"
+          )
+        );
+
+        if (videoClips.length > 0) {
+          controller.enqueue(
+            encoder.encode(
+              JSON.stringify({
+                type: "video-clips",
+                videoClips,
+              }) + "\n"
+            )
+          );
+        }
+
+        if (segmentOverrides && Object.keys(segmentOverrides).length > 0) {
+          controller.enqueue(
+            encoder.encode(
+              JSON.stringify({
+                type: "segment-overrides",
+                segmentOverrides,
+              }) + "\n"
+            )
+          );
+        }
+
+        for (const [lineIndex, line] of directorLines.entries()) {
+          controller.enqueue(
+            encoder.encode(
+              JSON.stringify({
+                type: "line",
+                payload: {
+                  ...line,
+                  lineIndex,
+                },
+              }) + "\n"
+            )
+          );
         }
       } finally {
         controller.close();
@@ -102,9 +193,9 @@ export async function POST(req: Request) {
     const effectiveCacheMode: CacheMode = cacheableSongId ? requestedCacheMode : "bypass-cache";
 
     if (cacheableSongId && effectiveCacheMode === "prefer-cache") {
-      const cachedLines = await loadDirectorLinesFromCache(cacheableSongId);
-      if (cachedLines && cachedLines.length > 0) {
-        return new Response(streamDirectorLines(cachedLines), {
+      const cachedAssets = await loadCachedAssetsFromCache(cacheableSongId);
+      if (cachedAssets && cachedAssets.directorLines.length > 0) {
+        return new Response(streamCachedAssets(cachedAssets), {
           headers: {
             "Content-Type": "application/x-ndjson",
             "X-Hearsay-Cache": "hit",
@@ -124,11 +215,22 @@ export async function POST(req: Request) {
 
     const encoder = new TextEncoder();
     const generatedLines: DirectorLine[] = [];
+    const pendingImageLines: Array<{ line: DirectorLine; lineIndex: number }> = [];
     const stream = new ReadableStream({
       async start(controller) {
         try {
+          controller.enqueue(
+            encoder.encode(
+              JSON.stringify({
+                type: "meta",
+                totalLines: allLines.length,
+              }) + "\n"
+            )
+          );
+
           for (let chunkIndex = 0; chunkIndex < lineChunks.length; chunkIndex++) {
             const chunk = lineChunks[chunkIndex];
+            const chunkStartIndex = chunkIndex * chunkSize;
 
             // Step 1: Generate hearsay + visual concepts
             const directorPrompt = `
@@ -151,13 +253,38 @@ Return valid JSON array of director outputs.
 
             const directorLines: DirectorLine[] = JSON.parse(jsonMatch[0]);
 
-            // Step 2: Generate images for each line if requested
-            if (generateImages) {
-              for (let i = 0; i < directorLines.length; i++) {
-                const line = directorLines[i];
-                
+            // Stream all lines immediately so lyric rendering is not blocked by image latency.
+            for (let i = 0; i < directorLines.length; i++) {
+              const line = directorLines[i];
+              const lineIndex = chunkStartIndex + i;
+              generatedLines.push(line);
+              pendingImageLines.push({ line, lineIndex });
+              controller.enqueue(
+                encoder.encode(
+                  JSON.stringify({
+                    type: "line",
+                    payload: {
+                      ...line,
+                      lineIndex,
+                    },
+                  }) + "\n"
+                )
+              );
+            }
+          }
+
+          // Step 2: Generate images after line streaming so users can read all lyrics quickly.
+          if (generateImages && pendingImageLines.length > 0) {
+            const queue = [...pendingImageLines];
+            const concurrency = Math.min(3, queue.length);
+
+            const runWorker = async () => {
+              while (queue.length > 0) {
+                const current = queue.shift();
+                if (!current) return;
+                const { line, lineIndex } = current;
+
                 try {
-                  // Use Gemini's native image generation with interleaved output
                   const imagePrompt = `Generate a single vivid image: ${line.visual}. 
 Style: Surrealist music video aesthetic, ${line.mood} mood, ${line.palette.join(" and ")} color palette.
 Cinematic 16:9, no text in image.`;
@@ -168,7 +295,6 @@ Cinematic 16:9, no text in image.`;
                     config: { responseModalities: ["IMAGE", "TEXT"] },
                   });
 
-                  // Extract image from response
                   const parts = imageResponse?.candidates?.[0]?.content?.parts ?? [];
                   for (const part of parts) {
                     if (part.thought) continue;
@@ -179,23 +305,30 @@ Cinematic 16:9, no text in image.`;
                     }
                   }
                 } catch (imgErr) {
-                  console.error(`[director] Image generation failed for line ${i}:`, imgErr);
+                  console.error(`[director] Image generation failed for line ${lineIndex}:`, imgErr);
                   line.imageRateLimited = isRateLimitedImageError(imgErr);
                   line.imageError = getErrorMessage(imgErr);
-                  // Continue without image — don't block the whole flow
                 }
 
-                // Stream each line as it completes (for progressive UI)
-                generatedLines.push(line);
-                controller.enqueue(encoder.encode(JSON.stringify(line) + "\n"));
-              }
-            } else {
-              // Stream all lines without images
-              for (const line of directorLines) {
-                generatedLines.push(line);
-                controller.enqueue(encoder.encode(JSON.stringify(line) + "\n"));
+                controller.enqueue(
+                  encoder.encode(
+                    JSON.stringify({
+                      type: "image-update",
+                      payload: {
+                        lineIndex,
+                        chinese: line.chinese,
+                        imageBase64: line.imageBase64,
+                        imageMimeType: line.imageMimeType,
+                        imageRateLimited: line.imageRateLimited,
+                        imageError: line.imageError,
+                      },
+                    }) + "\n"
+                  )
+                );
               }
             }
+
+            await Promise.all(Array.from({ length: concurrency }, () => runWorker()));
           }
 
           if (
