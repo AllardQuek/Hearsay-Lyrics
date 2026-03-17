@@ -12,8 +12,8 @@ The app now supports an interleaved media pipeline:
 
 The main page keeps input + output visible in one flow, with output switching between:
 
-- Studio mode: editing, refining, variants, slideshow/video triggers
-- Presenter mode: synced playback controls and stage view
+ - Studio mode: editing, refining, variants, slideshow/video triggers
+ - Perform mode: synced playback controls and stage view
 
 ## What Ships Today
 
@@ -32,7 +32,7 @@ The main page keeps input + output visible in one flow, with output switching be
 
 1. Studio sends lyrics to `POST /api/director`.
 2. Director returns NDJSON lines progressively, each containing lyric text fields and (when generated) image bytes.
-3. Presenter mode overlays active lyric text over generated visual backdrops.
+ 3. Perform mode overlays active lyric text over generated visual backdrops.
 4. Optional slideshow uses per-line visual prompts/images.
 5. Optional video flow starts via `POST /api/video` and polls `POST /api/video/status` until a clip is ready.
 
@@ -190,14 +190,14 @@ Expected when complete:
 2. Select `告白氣球 (Love Confession)` from Hit Singles.
 3. Keep cache toggle ON.
 4. Click Direct Scene.
-5. Confirm output appears in Studio, then switch to Presenter.
+ 5. Confirm output appears in Studio, then switch to Perform.
 6. Press Play and verify lyric progression + background visuals.
 
 Expected:
 
-- Fast cache-backed run
-- Stable playback against `/audio/love-confession.mp3`
-- Interleaved lyric + visual experience in Presenter mode
+ - Fast cache-backed run
+ - Stable playback against `/audio/love-confession.mp3`
+ - Interleaved lyric + visual experience in Perform mode
 
 ## Useful Docs
 

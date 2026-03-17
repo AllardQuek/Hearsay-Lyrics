@@ -78,7 +78,7 @@ export default function Home() {
   const generationEpochRef = useRef(0);
 
   const isStudioMode = outputMode === "studio";
-  const outputModeTitle = isStudioMode ? "Studio" : "Presenter";
+  const outputModeTitle = isStudioMode ? "Studio" : "Performance";
   const outputModeDescription = isStudioMode
     ? "Tune and refine your lyric sheet before showtime."
     : "Play back synced lyrics with cinematic visuals and controls.";
@@ -489,7 +489,8 @@ export default function Home() {
     audio?: string,
     preComputed?: Array<Partial<HearsayLine>>,
     songId?: string,
-    cacheMode: CacheMode = "prefer-cache"
+    cacheMode: CacheMode = "prefer-cache",
+    funnyWeight: number = 0.5
   ) => {
     setLoading(true);
     setAudioUrl(audio);
@@ -762,7 +763,7 @@ export default function Home() {
       const response = await fetch("/api/director", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ text, preComputed, songId, cacheMode }),
+        body: JSON.stringify({ text, preComputed, songId, cacheMode, funnyWeight }),
         signal: abortControllerRef.current.signal,
       });
 
@@ -1049,11 +1050,12 @@ export default function Home() {
               </div>
 
               <h1 className="text-5xl font-display font-bold tracking-tight text-white leading-[1.1] sm:text-6xl lg:text-7xl w-full max-w-4xl">
-                Sing Chinese <span className="text-transparent bg-clip-text bg-gradient-to-r from-primary to-accent italic font-serif">In English.</span>
+                Sing Chinese <span className="text-transparent bg-clip-text bg-gradient-to-r from-primary to-accent italic font-serif">Naturally.</span><br />
+                Feel The Flow.
               </h1>
 
               <p className="max-w-2xl text-base text-white/70 leading-relaxed sm:text-lg">
-                Hearsay-style, singability-first lyrics plus synced AI visuals and video, so more people can join KTV across cultures.
+                We rewrite for singability first, preserve phonetic resonance, and use meaning-aware English phrasing where possible.
               </p>
             </div>
 
@@ -1097,7 +1099,7 @@ export default function Home() {
                     )}
                   >
                     <Play size={14} fill="currentColor" />
-                    Presenter
+                    Perform
                   </button>
                 </div>
                 <p className="text-xs text-white/50 tracking-wide font-light">Switch between editing lyrics and belting them out.</p>

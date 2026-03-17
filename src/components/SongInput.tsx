@@ -30,7 +30,7 @@ export default function SongInput({
   onGenerate, 
   loading 
 }: { 
-  onGenerate: (text: string, audioUrl?: string, preComputed?: SyncLine[], songId?: string, cacheMode?: CacheMode) => void,
+  onGenerate: (text: string, audioUrl?: string, preComputed?: SyncLine[], songId?: string, cacheMode?: CacheMode, funnyWeight?: number) => void,
   loading: boolean
 }) {
   const [pastedText, setPastedText] = useState("");
@@ -39,6 +39,7 @@ export default function SongInput({
   const [selectedId, setSelectedId] = useState<string | undefined>(undefined);
   const [processingMode, setProcessingMode] = useState<"line" | "full">("full");
   const [preferCache, setPreferCache] = useState(true);
+  const [funnyWeight, setFunnyWeight] = useState(0.5);
   
   const [loadingStageIdx, setLoadingStageIdx] = useState(0);
 
@@ -82,7 +83,7 @@ export default function SongInput({
       : "bypass-cache";
 
     if (effectiveText.trim() && !loading) {
-      onGenerate(effectiveText, effectiveAudio, effectiveSync, effectiveId, effectiveCacheMode);
+      onGenerate(effectiveText, effectiveAudio, effectiveSync, effectiveId, effectiveCacheMode, funnyWeight);
     }
   };
 
@@ -189,7 +190,7 @@ export default function SongInput({
     }
   };
 
-  const PRIMARY_ACTION_LABEL = "Direct Scene";
+  const PRIMARY_ACTION_LABEL = "Direct\u00A0\u00A0MV";
   const isCacheControlEnabled = isCacheableSongId(selectedId);
 
   return (
@@ -403,61 +404,87 @@ export default function SongInput({
           </div>
         </div>
 
-        {/* Generate Button - Stage Trigger Style */}
-        <div className="pt-12 flex flex-col items-center">
-          <div className="mb-4 w-full max-w-[460px]">
-            <div
-              className={cn(
-                "flex items-center justify-between gap-3 rounded-xl border px-4 py-3",
-                isCacheControlEnabled ? "border-white/15 bg-white/[0.03]" : "border-white/10 bg-transparent"
-              )}
-            >
-              <div className="min-w-0">
-                <p className={cn("text-sm font-medium", isCacheControlEnabled ? "text-white" : "text-white/45")}>Use cache</p>
-                <p className={cn("text-[11px]", isCacheControlEnabled ? "text-white/55" : "text-white/35")}>
-                  {isCacheControlEnabled
-                    ? "On: cache-first. Off: always regenerate fresh."
-                    : "Available for cacheable demo songs."}
-                </p>
+        {/* Compact controls: Creative bias + Cache toggle (same row) */}
+        <div className="grid grid-cols-1 gap-8 lg:grid-cols-12 lg:gap-10">
+          <div className="lg:col-span-3" />
+          <div className="lg:col-span-9 flex flex-col items-center">
+            <div className="w-full max-w-[960px]">
+              <div className="flex items-center justify-between gap-4 w-full">
+                <div className="flex-1">
+                  <div className="flex items-center justify-between gap-3 rounded-full border border-white/10 px-3 py-2 bg-transparent">
+                    <div className="flex items-center gap-3">
+                      <div className="text-sm font-medium text-white/70">Creative bias</div>
+                      <div className="text-[11px] text-white/70 w-[44px] text-right">{Math.round(funnyWeight * 100)}%</div>
+                    </div>
+                    <div className="flex items-center gap-3 w-full max-w-[360px]">
+                      <span className="text-[11px] text-white/40">Faithful</span>
+                      <input
+                        type="range"
+                        min="0"
+                        max="1"
+                        step="0.05"
+                        value={funnyWeight}
+                        onChange={(e) => setFunnyWeight(parseFloat(e.target.value))}
+                        aria-label="Creative bias: Faithful to Funny"
+                        className="flex-1 h-1 bg-white/5 rounded-lg accent-primary"
+                      />
+                      <span className="text-[11px] text-white/40">Funny</span>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="flex-shrink-0">
+                  <div
+                    className={cn(
+                      "flex items-center gap-3 rounded-full border px-3 py-2",
+                      isCacheControlEnabled ? "border-white/15 bg-white/[0.02]" : "border-white/10 bg-transparent"
+                    )}
+                  >
+                    <p className={cn("text-sm font-medium m-0", isCacheControlEnabled ? "text-white" : "text-white/45")}>Use cache</p>
+                    <button
+                      onClick={() => setPreferCache((prev) => !prev)}
+                      disabled={!isCacheControlEnabled}
+                      className={cn(
+                        "relative inline-flex h-6 w-11 shrink-0 items-center rounded-full border transition-all disabled:cursor-not-allowed disabled:opacity-50",
+                        preferCache
+                          ? "border-primary/50 bg-primary/30"
+                          : "border-white/20 bg-white/10"
+                      )}
+                      aria-label="Toggle cache preference"
+                    >
+                      <span
+                        className={cn(
+                          "inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform",
+                          preferCache ? "translate-x-5" : "translate-x-1"
+                        )}
+                      />
+                    </button>
+                  </div>
+                </div>
               </div>
-              <button
-                onClick={() => setPreferCache((prev) => !prev)}
-                disabled={!isCacheControlEnabled}
-                className={cn(
-                  "relative inline-flex h-7 w-12 shrink-0 items-center rounded-full border transition-all disabled:cursor-not-allowed disabled:opacity-50",
-                  preferCache
-                    ? "border-primary/50 bg-primary/30"
-                    : "border-white/20 bg-white/10"
-                )}
-                aria-label="Toggle cache preference"
-              >
-                <span
-                  className={cn(
-                    "inline-block h-5 w-5 transform rounded-full bg-white shadow transition-transform",
-                    preferCache ? "translate-x-6" : "translate-x-1"
-                  )}
-                />
-              </button>
+
+              <div className="mt-4" />
             </div>
           </div>
+        </div>
+      </div>
 
+      {/* Full-width centered CTA (not part of steps) */}
+      <div className="w-full flex flex-col items-center">
+        <div className="w-full flex justify-center mt-6">
           <button
             onClick={handleGenerate}
             disabled={loading || !pastedText.trim()}
             className={cn(
               "group relative isolate w-full max-w-[400px] h-[72px] overflow-hidden rounded-2xl transition-all duration-500",
-              loading 
-                ? "bg-zinc-900 border border-white/5 cursor-wait" 
+              loading
+                ? "bg-zinc-900 border border-white/5 cursor-wait"
                 : "bg-primary hover:brightness-110 active:scale-[0.98] cursor-pointer shadow-[0_20px_50px_-15px_rgba(244,63,94,0.5)] hover:shadow-[0_25px_60px_-10px_rgba(244,63,94,0.7)]"
             )}
             aria-label="Direct hearsay media"
           >
-            {/* Glossy Overlay for "Pop" */}
             <div className="absolute inset-0 z-0 bg-gradient-to-b from-white/20 to-transparent pointer-events-none" />
-            
-            {/* Animated Highlight Sweep */}
             <div className="absolute inset-0 z-0 bg-gradient-to-r from-transparent via-white/30 to-transparent -translate-x-full group-hover:animate-[shimmer_2s_infinite] pointer-events-none" />
-            
             <div className="relative z-10 flex items-center justify-center gap-4 px-8">
               {loading ? (
                 <div className="flex items-center gap-4 w-full justify-center">
@@ -467,7 +494,7 @@ export default function SongInput({
                   </div>
                   <div className="h-6 overflow-hidden relative w-48">
                     <AnimatePresence mode="wait">
-                      <motion.span 
+                      <motion.span
                         key={loadingStageIdx}
                         initial={{ y: 20, opacity: 0 }}
                         animate={{ y: 0, opacity: 1 }}
@@ -485,20 +512,20 @@ export default function SongInput({
                   <div className="relative flex items-center justify-center">
                     <Zap size={26} className="text-white fill-white drop-shadow-[0_2px_8px_rgba(255,255,255,0.4)] transition-all duration-500 group-hover:scale-110 group-hover:rotate-12" />
                   </div>
-                  <span className="font-display text-2xl font-black tracking-tighter uppercase italic text-white antialiased drop-shadow-[0_2px_10px_rgba(0,0,0,0.2)]">
+                  <span className="font-display text-2xl font-black tracking-normal uppercase italic text-white antialiased drop-shadow-[0_2px_10px_rgba(0,0,0,0.2)]">
                     {PRIMARY_ACTION_LABEL}
                   </span>
                 </>
               )}
             </div>
           </button>
-
-          {!pastedText.trim() && !loading && (
-            <p className="mt-4 text-[10px] uppercase tracking-[0.2em] text-white/20 font-medium">
-              Awaiting script input
-            </p>
-          )}
         </div>
+
+        {!pastedText.trim() && !loading && (
+          <p className="mt-4 text-[10px] uppercase tracking-[0.2em] text-white/20 font-medium text-center">
+            Awaiting script input
+          </p>
+        )}
       </div>
     </div>
   );

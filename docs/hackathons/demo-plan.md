@@ -14,7 +14,7 @@ Convince judges that Hearsay makes foreign-language songs performable by anyone 
 ## Core Messaging (3 phrases to repeat)
 - We translate singability, not just meaning.
 - We preserve sound and rhythm so words map to melody.
-- Studio for creation, Presenter for performance.
+- Studio for creation, Perform for performance.
 
 ## Timed Run of Show (3:30 Target)
 
@@ -36,10 +36,10 @@ Convince judges that Hearsay makes foreign-language songs performable by anyone 
 
 ### 1:40–2:05 | Line-Level Edit → Lock
 - Spoken: "A performer can tweak lines per phrase, then lock timing for playback." 
-- Action: Edit one line in-place, show diff/variant history, then lock the set for Presenter mode.
+ - Action: Edit one line in-place, show diff/variant history, then lock the set for Perform mode.
 
-### 2:05–2:35 | Presenter Mode + Synced Playback
-- Spoken: "Switching to Presenter — now this is a performance-ready track." 
+### 2:05–2:35 | Perform Mode + Synced Playback
+ - Spoken: "Switching to Perform — now this is a performance-ready track." 
 - Action: Switch view to Presenter, start playback on cached or generated audio, let lyric highlight move with music; show pinyin and meaning overlays as optional toggles.
 
 ### 2:35–3:05 | Multimedia Wow & Social Moment
@@ -50,7 +50,7 @@ Convince judges that Hearsay makes foreign-language songs performable by anyone 
 - Spoken: "Hearsay turns songs into shared performances. It makes C-pop participation inclusive, playful, and production-ready. Try it with your song — or connect via our API to integrate it into any karaoke app." 
 - Action: Show sign-up/next-steps slide and one-sentence roadmap (duet mode, mobile, scoring).
 
-## Full Presenter Script (copy-paste ready)
+## Full Perform Script (copy-paste ready)
 - 0:00 — "Have you ever wanted to sing a song in another language but the words just won't fit the melody? What if you could sing C-pop in English — and still sound like the original?" (press play on cached clip)
 - 0:10 — "That 10 seconds is the outcome we want. In the next three minutes I'll show you how we get there from raw Mandarin lyrics — live, editable, and performance-ready." 
 - 0:22 — "Translation apps give meaning. Karaoke needs rhythm and phonetic feel. Hearsay translates singability, not just words." 
@@ -58,7 +58,7 @@ Convince judges that Hearsay makes foreign-language songs performable by anyone 
 - 0:45 — "You can see results stream line-by-line. Each line preserves syllable count and stress so it maps to the melody." 
 - 1:10 — "Now I can tune the voice of the lines — faithful to playful — and pick a variant I like." (move slider, choose variant)
 - 1:25 — "If a line needs work, we refine it, or you can edit by hand — the system keeps variants and history." (edit a line quickly)
-- 1:45 — "Locking these and switching to Presenter mode gives us strict timing for playback — perfect for a live performance." (switch mode)
+ - 1:45 — "Locking these and switching to Perform mode gives us strict timing for playback — perfect for a live performance." (switch mode)
 - 2:05 — "Start playback — lyrics highlight in time, pinyin and meaning toggle on for learning, visuals sync for stage presence." (hit Play)
 - 2:30 — "For a performance we can add AI-generated visuals or export a short video clip to share on social." (toggle visuals / show export)
 - 2:45 — "Hearsay isn't just a translator — it's an instrument that helps you perform songs across languages. If you'd like to try a song, we can queue yours next."
@@ -67,7 +67,7 @@ Convince judges that Hearsay makes foreign-language songs performable by anyone 
 - Blend of entertainment + education: Hearsay is performance-first (singability, timing, stage-ready output) while simultaneously supporting learning (pinyin, phonetic anchors, meaning). This dual focus unlocks both casual karaoke users and learners.
 - Performance-first models: we optimize outputs for syllable count, stress, and singability rather than literal fidelity, producing lines that map naturally to melodies.
 - Streaming, per-line generation + timing lock: judges see instant feedback and deterministic playback for live performance — a UX advantage over batch translators or static lyric apps.
-- Integration & export: sync-ready Presenter mode, AI visual backdrops, short video export, and an API/SDK make Hearsay embeddable across KTVs, apps, and creator tools.
+- Integration & export: sync-ready Perform mode, AI visual backdrops, short video export, and an API/SDK make Hearsay embeddable across KTVs, apps, and creator tools.
 - Defensibility: proprietary phonetic alignment techniques, curated singability datasets, and UX that couples editing + locked timing make our product hard to replicate quickly.
 
 ### Business, GTM & Monetization (judge-facing summary)
@@ -94,7 +94,7 @@ Convince judges that Hearsay makes foreign-language songs performable by anyone 
 - Pinyin + meaning and phonetic anchors.
 - Faithful↔Funny (style) slider and per-line variants.
 - Per-line refine and manual edit history.
-- Studio mode for editing and Presenter mode for synced playback.
+- Studio mode for editing and Perform mode for synced playback.
 - AI visual backdrops and short video export pipeline.
 
 ## Reliability & Backup Plan
@@ -103,4 +103,4 @@ Convince judges that Hearsay makes foreign-language songs performable by anyone 
 - If generation takes longer than expected, narrate and shorten the step — keep the performance playback for judges.
 
 ---
-Notes: keep hero + input visible during creation segments; keep Presenter view focused on timing and visual impact. Deliver the scripted lines with pacing: quick hook, focused demo, then immersive close.
+Notes: keep hero + input visible during creation segments; keep Perform view focused on timing and visual impact. Deliver the scripted lines with pacing: quick hook, focused demo, then immersive close.
