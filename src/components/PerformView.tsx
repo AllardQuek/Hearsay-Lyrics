@@ -5,6 +5,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import {
   Share2,
   Save,
+  Download,
   Loader2,
   Check,
   Play,
@@ -34,6 +35,8 @@ const PRE_SHOW_MESSAGES = [
 ];
 
 const START_SCREEN_THRESHOLD_SECONDS = 0.2;
+
+type ExportStage = "idle" | "preparing" | "rendering" | "finalizing" | "complete" | "error";
 
 interface PerformViewProps {
   results: HearsayLine[];
@@ -73,9 +76,14 @@ export default function PerformView({
   const [duration, setDuration] = useState(0);
   const [isPlaying, setIsPlaying] = useState(false);
   const [isMuted, setIsMuted] = useState(false);
+  const [isDownloadingVideo, setIsDownloadingVideo] = useState(false);
+  const [downloadProgressPercent, setDownloadProgressPercent] = useState(0);
+  const [downloadStage, setDownloadStage] = useState<ExportStage>("idle");
+  const [downloadMessage, setDownloadMessage] = useState<string | null>(null);
   const [dismissedIntroForKey, setDismissedIntroForKey] = useState<string | null>(null);
   const [showDiagnostics, setShowDiagnostics] = useState(false);
   const audioRef = useRef<HTMLAudioElement>(null);
+  const exportInFlightRef = useRef(false);
 
   const progress = expectedTotalLines > 0 ? (directorLines.length / expectedTotalLines) * 100 : 0;
   const hasAudio = Boolean(audioUrl);
@@ -165,6 +173,35 @@ export default function PerformView({
     return activeVideoClip.videoUri;
   }, [activeVideoClip]);
 
+  const hasAnyReadyVideoClip = useMemo(
+    () => Object.values(videoClips).some((clip) => clip.status === "ready" && Boolean(clip.videoBase64 || clip.videoUri)),
+    [videoClips]
+  );
+
+  const hasAnyGeneratedImage = useMemo(
+    () => directorLines.some((line) => Boolean(line.imageBase64)),
+    [directorLines]
+  );
+
+  const canDownloadPerformanceVideo = hasAudio && duration > 0 && (hasAnyReadyVideoClip || hasAnyGeneratedImage);
+
+  const downloadStageLabel = useMemo(() => {
+    switch (downloadStage) {
+      case "preparing":
+        return "Preparing";
+      case "rendering":
+        return "Rendering";
+      case "finalizing":
+        return "Finalizing";
+      case "complete":
+        return "Complete";
+      case "error":
+        return "Failed";
+      default:
+        return "Idle";
+    }
+  }, [downloadStage]);
+
   const isUsingNearestImageFallback = Boolean(
     !activeVideoSrc &&
       fallbackDirectorLine?.imageBase64 &&
@@ -211,6 +248,488 @@ export default function PerformView({
     isPreShow,
     isUsingNearestImageFallback,
   ]);
+
+  const handleDownloadVideo = useCallback(async () => {
+    if (!audioUrl || !canDownloadPerformanceVideo || isDownloadingVideo || exportInFlightRef.current) return;
+    if (typeof window === "undefined" || typeof MediaRecorder === "undefined") {
+      setDownloadStage("error");
+      setDownloadMessage("This browser does not support full video export.");
+      return;
+    }
+
+    exportInFlightRef.current = true;
+
+    const sanitizeToken = (value: string) =>
+      value
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, "-")
+        .replace(/^-+|-+$/g, "");
+
+    const songToken = sanitizeToken(currentSongId || "hearsay");
+    const filenameBase = `${songToken || "hearsay"}-full-performance`;
+
+    const loadImageElement = (src: string) =>
+      new Promise<HTMLImageElement>((resolve, reject) => {
+        const image = new window.Image();
+        image.onload = () => resolve(image);
+        image.onerror = () => reject(new Error("Failed to load render image asset"));
+        image.src = src;
+      });
+
+    const loadVideoElement = (src: string) =>
+      new Promise<HTMLVideoElement>((resolve, reject) => {
+        const video = document.createElement("video");
+        video.preload = "auto";
+        video.muted = true;
+        video.playsInline = true;
+        video.crossOrigin = "anonymous";
+        video.src = src;
+
+        const cleanup = () => {
+          video.onloadedmetadata = null;
+          video.onerror = null;
+        };
+
+        video.onloadedmetadata = () => {
+          cleanup();
+          resolve(video);
+        };
+        video.onerror = () => {
+          cleanup();
+          reject(new Error("Failed to load render video asset"));
+        };
+      });
+
+    const drawCover = (ctx: CanvasRenderingContext2D, source: CanvasImageSource, width: number, height: number) => {
+      const sourceWidth = (source as { videoWidth?: number; naturalWidth?: number; width?: number }).videoWidth
+        ?? (source as { naturalWidth?: number; width?: number }).naturalWidth
+        ?? (source as { width?: number }).width
+        ?? width;
+      const sourceHeight = (source as { videoHeight?: number; naturalHeight?: number; height?: number }).videoHeight
+        ?? (source as { naturalHeight?: number; height?: number }).naturalHeight
+        ?? (source as { height?: number }).height
+        ?? height;
+
+      const scale = Math.max(width / sourceWidth, height / sourceHeight);
+      const drawWidth = sourceWidth * scale;
+      const drawHeight = sourceHeight * scale;
+      const dx = (width - drawWidth) / 2;
+      const dy = (height - drawHeight) / 2;
+
+      ctx.drawImage(source, dx, dy, drawWidth, drawHeight);
+    };
+
+    const getVideoSource = (clip?: VideoClipAsset): string | undefined => {
+      if (!clip || clip.status !== "ready") return undefined;
+      if (clip.videoBase64) {
+        return `data:${clip.mimeType || "video/mp4"};base64,${clip.videoBase64}`;
+      }
+      return clip.videoUri;
+    };
+
+    setIsDownloadingVideo(true);
+    setDownloadStage("preparing");
+    setDownloadProgressPercent(1);
+    setDownloadMessage("Preparing assets for full-song export...");
+
+    let animationFrameId: number | null = null;
+    let audioContext: AudioContext | null = null;
+    let renderAudio: HTMLAudioElement | null = null;
+    let currentProgress = 1;
+    let currentStage: ExportStage = "preparing";
+    let lastProgressBucket = -1;
+
+    const updateProgress = (nextPercent: number, stage: ExportStage, message?: string) => {
+      const clamped = Math.max(0, Math.min(100, Math.round(nextPercent)));
+      if (clamped === currentProgress && stage === currentStage) return;
+      currentProgress = clamped;
+      currentStage = stage;
+      setDownloadProgressPercent(clamped);
+      setDownloadStage(stage);
+      if (message) {
+        setDownloadMessage(message);
+      }
+
+      const bucket = Math.floor(clamped / 10);
+      if (bucket > lastProgressBucket) {
+        lastProgressBucket = bucket;
+        console.info(`[PerformView] Export progress ${clamped}% (${stage})`);
+      }
+    };
+
+    const formatExportTime = (seconds: number) => {
+      const safe = Math.max(0, seconds);
+      const mins = Math.floor(safe / 60);
+      const secs = Math.floor(safe % 60);
+      return `${mins}:${secs.toString().padStart(2, "0")}`;
+    };
+
+    try {
+      const renderWidth = 1280;
+      const renderHeight = 720;
+      const canvas = document.createElement("canvas");
+      canvas.width = renderWidth;
+      canvas.height = renderHeight;
+      const ctx = canvas.getContext("2d");
+
+      if (!ctx) {
+        throw new Error("Failed to initialize render canvas");
+      }
+
+      const exportDuration = duration > 0
+        ? duration
+        : Math.max(
+            ...results.map((line, index) => {
+              const timedLine = line as HearsayLine & { endTime?: number };
+              if (typeof timedLine.endTime === "number") return timedLine.endTime;
+              if (typeof timedLine.startTime === "number") return timedLine.startTime + 2.6;
+              return (index + 1) * 2.6;
+            }),
+            1
+          );
+
+      const timelineSegments = mediaSegments.length > 0
+        ? mediaSegments
+        : [
+            {
+              id: "segment-1",
+              startTime: 0,
+              endTime: exportDuration,
+              durationSeconds: exportDuration,
+              lineIndices: results.map((_, index) => index),
+              mediaType: "image" as const,
+              promptText: "",
+              reason: "fallback",
+            },
+          ];
+
+      const nearestImageForLine = (lineIndex: number): DirectorLine | undefined => {
+        const exact = directorLines[lineIndex];
+        if (exact?.imageBase64) return exact;
+
+        for (let offset = 1; offset < directorLines.length; offset++) {
+          const left = lineIndex - offset;
+          const right = lineIndex + offset;
+          if (left >= 0 && directorLines[left]?.imageBase64) return directorLines[left];
+          if (right < directorLines.length && directorLines[right]?.imageBase64) return directorLines[right];
+        }
+
+        return directorLines.find((line) => Boolean(line.imageBase64));
+      };
+
+      const segmentImageSrc = new Map<string, string>();
+      for (const segment of timelineSegments) {
+        const lineIndexWithImage = segment.lineIndices.find((lineIndex) => Boolean(directorLines[lineIndex]?.imageBase64));
+        const seedIndex = lineIndexWithImage ?? segment.lineIndices[0] ?? 0;
+        const candidate = nearestImageForLine(seedIndex);
+        if (candidate?.imageBase64) {
+          const mime = candidate.imageMimeType || "image/png";
+          segmentImageSrc.set(segment.id, `data:${mime};base64,${candidate.imageBase64}`);
+        }
+      }
+
+      const videoElements = new Map<string, HTMLVideoElement>();
+      const imageElements = new Map<string, HTMLImageElement>();
+
+      const totalPrepareSteps = Math.max(1, timelineSegments.length + 1);
+      let completedPrepareSteps = 0;
+
+      const bumpPrepareProgress = () => {
+        completedPrepareSteps += 1;
+        const prepareProgress = 2 + (completedPrepareSteps / totalPrepareSteps) * 18;
+        updateProgress(prepareProgress, "preparing", "Preparing assets for full-song export...");
+      };
+
+      await Promise.all(
+        timelineSegments.map(async (segment) => {
+          if (segment.mediaType === "video") {
+            const clipSrc = getVideoSource(videoClips[segment.id]);
+            if (clipSrc) {
+              try {
+                const videoElement = await loadVideoElement(clipSrc);
+                videoElements.set(segment.id, videoElement);
+              } catch {
+                // Ignore broken clip and fall back to image.
+              }
+            }
+          }
+
+          const imageSrc = segmentImageSrc.get(segment.id);
+          if (imageSrc) {
+            try {
+              const imageElement = await loadImageElement(imageSrc);
+              imageElements.set(segment.id, imageElement);
+            } catch {
+              // Keep black fallback if image is unavailable.
+            }
+          }
+
+          bumpPrepareProgress();
+        })
+      );
+
+      renderAudio = new Audio(audioUrl);
+      renderAudio.preload = "auto";
+      renderAudio.crossOrigin = "anonymous";
+      await new Promise<void>((resolve, reject) => {
+        if (renderAudio && renderAudio.readyState >= 1) {
+          resolve();
+          return;
+        }
+
+        const onLoaded = () => {
+          cleanup();
+          resolve();
+        };
+        const onError = () => {
+          cleanup();
+          reject(new Error("Failed to load song audio for export"));
+        };
+        const cleanup = () => {
+          if (!renderAudio) return;
+          renderAudio.removeEventListener("loadedmetadata", onLoaded);
+          renderAudio.removeEventListener("error", onError);
+        };
+
+        renderAudio?.addEventListener("loadedmetadata", onLoaded);
+        renderAudio?.addEventListener("error", onError);
+      });
+
+      bumpPrepareProgress();
+
+      const stream = canvas.captureStream(30);
+      try {
+        audioContext = new AudioContext();
+        const sourceNode = audioContext.createMediaElementSource(renderAudio);
+        const destination = audioContext.createMediaStreamDestination();
+        sourceNode.connect(destination);
+        if (audioContext.state === "suspended") {
+          await audioContext.resume();
+        }
+        destination.stream.getAudioTracks().forEach((track) => stream.addTrack(track));
+      } catch (error) {
+        console.warn("[PerformView] Audio track export unavailable, proceeding with silent video:", error);
+      }
+
+      const preferredMimeTypes = [
+        "video/webm;codecs=vp9,opus",
+        "video/webm;codecs=vp8,opus",
+        "video/webm",
+        "video/mp4",
+      ];
+      const mimeType = preferredMimeTypes.find((candidate) => MediaRecorder.isTypeSupported(candidate));
+      const recorder = mimeType
+        ? new MediaRecorder(stream, { mimeType, videoBitsPerSecond: 8_000_000 })
+        : new MediaRecorder(stream);
+
+      const chunks: Blob[] = [];
+      const completion = new Promise<Blob>((resolve, reject) => {
+        recorder.ondataavailable = (event) => {
+          if (event.data.size > 0) chunks.push(event.data);
+        };
+        recorder.onerror = () => reject(new Error("Recording failed during full-song export"));
+        recorder.onstop = () => {
+          const blobType = mimeType || chunks[0]?.type || "video/webm";
+          resolve(new Blob(chunks, { type: blobType }));
+        };
+      });
+
+      const lyricTiming = results
+        .map((line, index) => ({
+          index,
+          start: typeof line.startTime === "number" ? line.startTime : index * 2.6,
+        }))
+        .sort((a, b) => a.start - b.start);
+
+      const resolveActiveLyricIndex = (time: number) => {
+        if (lyricTiming.length === 0) return -1;
+        let active = lyricTiming[0].index;
+        for (const entry of lyricTiming) {
+          if (entry.start <= time) {
+            active = entry.index;
+          } else {
+            break;
+          }
+        }
+        return active;
+      };
+
+      const renderFrame = (time: number) => {
+        ctx.fillStyle = "#000";
+        ctx.fillRect(0, 0, renderWidth, renderHeight);
+
+        const segment = resolveActiveSegment(timelineSegments, time);
+        let drewVisual = false;
+
+        if (segment?.mediaType === "video") {
+          const segmentVideo = videoElements.get(segment.id);
+          if (segmentVideo && segmentVideo.readyState >= 2) {
+            const relative = Math.max(0, time - segment.startTime);
+            const loopDuration = Number.isFinite(segmentVideo.duration) && segmentVideo.duration > 0
+              ? segmentVideo.duration
+              : undefined;
+            if (loopDuration) {
+              const target = relative % loopDuration;
+              if (Math.abs(segmentVideo.currentTime - target) > 0.08) {
+                segmentVideo.currentTime = target;
+              }
+            }
+            drawCover(ctx, segmentVideo, renderWidth, renderHeight);
+            drewVisual = true;
+          }
+        }
+
+        if (!drewVisual && segment) {
+          const segmentImage = imageElements.get(segment.id);
+          if (segmentImage) {
+            drawCover(ctx, segmentImage, renderWidth, renderHeight);
+            drewVisual = true;
+          }
+        }
+
+        if (!drewVisual) {
+          const fallbackImage = imageElements.values().next().value as HTMLImageElement | undefined;
+          if (fallbackImage) {
+            drawCover(ctx, fallbackImage, renderWidth, renderHeight);
+          }
+        }
+
+        const topGradient = ctx.createLinearGradient(0, 0, 0, renderHeight * 0.5);
+        topGradient.addColorStop(0, "rgba(0, 0, 0, 0.22)");
+        topGradient.addColorStop(1, "rgba(0, 0, 0, 0)");
+        ctx.fillStyle = topGradient;
+        ctx.fillRect(0, 0, renderWidth, renderHeight);
+
+        const bottomGradient = ctx.createLinearGradient(0, renderHeight * 0.55, 0, renderHeight);
+        bottomGradient.addColorStop(0, "rgba(0, 0, 0, 0)");
+        bottomGradient.addColorStop(1, "rgba(0, 0, 0, 0.6)");
+        ctx.fillStyle = bottomGradient;
+        ctx.fillRect(0, 0, renderWidth, renderHeight);
+
+        const lyricIndex = resolveActiveLyricIndex(time);
+        const lyricLine = lyricIndex >= 0 ? results[lyricIndex] : undefined;
+
+        if (lyricLine?.candidates?.[0]?.text) {
+          const englishLyric = lyricLine.candidates[0].text;
+          const chineseLyric = lyricLine.chinese;
+
+          ctx.textAlign = "center";
+          ctx.textBaseline = "bottom";
+
+          ctx.shadowColor = "rgba(0, 0, 0, 0.85)";
+          ctx.shadowBlur = 20;
+
+          ctx.fillStyle = "#FFFFFF";
+          ctx.font = "700 54px sans-serif";
+          ctx.fillText(englishLyric, renderWidth / 2, renderHeight - 110, renderWidth - 120);
+
+          ctx.fillStyle = "rgba(255, 255, 255, 0.95)";
+          ctx.font = "600 34px sans-serif";
+          ctx.fillText(chineseLyric, renderWidth / 2, renderHeight - 48, renderWidth - 120);
+
+          ctx.shadowBlur = 0;
+        }
+      };
+
+      recorder.start(250);
+      renderAudio.currentTime = 0;
+      renderAudio.playbackRate = 1;
+      await renderAudio.play();
+
+      updateProgress(20, "rendering", "Rendering video frames...");
+
+      await new Promise<void>((resolve) => {
+        const startedAt = performance.now();
+        const step = () => {
+          const elapsed = (performance.now() - startedAt) / 1000;
+          const now = Math.min(elapsed, exportDuration);
+          renderFrame(now);
+
+          const renderProgress = 20 + (now / Math.max(exportDuration, 0.1)) * 75;
+          const remaining = Math.max(0, exportDuration - now);
+          updateProgress(
+            renderProgress,
+            "rendering",
+            `Rendering video frames... ${formatExportTime(now)} / ${formatExportTime(exportDuration)} (ETA ${formatExportTime(remaining)})`
+          );
+
+          if (elapsed >= exportDuration) {
+            resolve();
+            return;
+          }
+
+          animationFrameId = requestAnimationFrame(step);
+        };
+
+        step();
+      });
+
+      recorder.stop();
+      renderAudio.pause();
+      updateProgress(96, "finalizing", "Finalizing video file...");
+      const blob = await completion;
+
+      stream.getTracks().forEach((track) => track.stop());
+
+      const outputMime = mimeType || blob.type || "video/webm";
+      const extension = outputMime.includes("mp4") ? "mp4" : "webm";
+      const fileName = `${filenameBase}.${extension}`;
+      const blobUrl = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = blobUrl;
+      link.download = fileName;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      setTimeout(() => URL.revokeObjectURL(blobUrl), 2000);
+
+      updateProgress(100, "complete", `Saved ${fileName}`);
+      setDownloadMessage(`Saved ${fileName}`);
+    } catch (error) {
+      console.error("[PerformView] Failed to export full-song video:", error);
+      const message = error instanceof Error ? error.message : "Full-song export failed";
+      setDownloadStage("error");
+      setDownloadMessage(message);
+    } finally {
+      if (animationFrameId !== null) {
+        cancelAnimationFrame(animationFrameId);
+      }
+      if (renderAudio) {
+        renderAudio.pause();
+        renderAudio.src = "";
+      }
+      if (audioContext) {
+        void audioContext.close();
+      }
+      setIsDownloadingVideo(false);
+      exportInFlightRef.current = false;
+    }
+  }, [
+    audioUrl,
+    canDownloadPerformanceVideo,
+    currentSongId,
+    directorLines,
+    duration,
+    isDownloadingVideo,
+    mediaSegments,
+    results,
+    videoClips,
+  ]);
+
+  useEffect(() => {
+    if (downloadMessage && !isDownloadingVideo) {
+      const timer = window.setTimeout(() => setDownloadMessage(null), 5000);
+      return () => window.clearTimeout(timer);
+    }
+    return;
+  }, [downloadMessage, isDownloadingVideo]);
+
+  useEffect(() => {
+    if (!isDownloadingVideo && !downloadMessage && (downloadProgressPercent !== 0 || downloadStage !== "idle")) {
+      setDownloadProgressPercent(0);
+      setDownloadStage("idle");
+    }
+  }, [downloadMessage, downloadProgressPercent, downloadStage, isDownloadingVideo]);
 
   const handleTogglePlay = useCallback(() => {
     if (!audioRef.current) return;
@@ -448,6 +967,14 @@ export default function PerformView({
 
               <div className="flex items-center gap-2">
                 <button
+                  onClick={() => void handleDownloadVideo()}
+                  disabled={!canDownloadPerformanceVideo || isDownloadingVideo}
+                  className="p-2.5 bg-white/5 border border-white/10 hover:border-white/30 text-white/70 hover:text-white rounded-full transition-all flex items-center justify-center hover:bg-white/10 disabled:opacity-40 disabled:cursor-not-allowed"
+                  title={canDownloadPerformanceVideo ? "Download full performance video" : "Waiting for audio/visual assets"}
+                >
+                  {isDownloadingVideo ? <Loader2 size={18} className="animate-spin" /> : <Download size={18} />}
+                </button>
+                <button
                   onClick={onShare}
                   className="p-2.5 bg-white/5 border border-white/10 hover:border-white/30 text-white/70 hover:text-white rounded-full transition-all flex items-center justify-center hover:bg-white/10"
                   title="Copy to Clipboard"
@@ -483,6 +1010,29 @@ export default function PerformView({
                 )}
               </div>
             </div>
+
+            {(isDownloadingVideo || downloadMessage) && (
+              <div className="mb-3 space-y-2">
+                {isDownloadingVideo && (
+                  <div className="space-y-1">
+                    <div className="flex items-center justify-between text-[10px] font-mono uppercase tracking-[0.14em] text-white/70">
+                      <span>{downloadStageLabel}</span>
+                      <span>{downloadProgressPercent}%</span>
+                    </div>
+                    <div className="h-1.5 w-full overflow-hidden rounded-full border border-white/10 bg-black/25">
+                      <div
+                        className="h-full bg-gradient-to-r from-primary via-rose-400 to-accent transition-[width] duration-200"
+                        style={{ width: `${downloadProgressPercent}%` }}
+                      />
+                    </div>
+                  </div>
+                )}
+
+                {downloadMessage && (
+                  <p className="text-center text-[11px] font-mono text-white/65">{downloadMessage}</p>
+                )}
+              </div>
+            )}
 
             <div className="mb-4 flex items-center gap-3 sm:gap-4">
               <span className="w-12 text-xs font-mono text-white/90">{formatTime(currentTime)}</span>
