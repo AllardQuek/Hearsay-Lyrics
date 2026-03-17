@@ -1050,15 +1050,13 @@ export default function Home() {
               </div>
 
               <h1 className="text-5xl font-display font-bold tracking-tight text-white leading-[1.1] sm:text-6xl lg:text-7xl w-full max-w-4xl">
-                Sing Chinese <span className="text-transparent bg-clip-text bg-gradient-to-r from-primary to-accent italic font-serif">Naturally.</span><br />
-                Feel The Flow.
+                Sing Chinese <span className="text-transparent bg-clip-text bg-gradient-to-r from-primary to-accent italic font-serif">In English.</span>
               </h1>
 
               <p className="max-w-2xl text-base text-white/70 leading-relaxed sm:text-lg">
-                We rewrite for singability first, preserve phonetic resonance, and use meaning-aware English phrasing where possible.
+                Hearsay-style, singability-first lyrics plus synced AI visuals and video, so more people can join KTV across cultures.
               </p>
             </div>
-
             <SongInput 
               onGenerate={startDirectorStream}
               loading={loading}
