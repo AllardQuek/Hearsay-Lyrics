@@ -48,6 +48,12 @@ A Gemini-powered web app that generates singable English "hearsay" lyrics for Ma
 - Gemini models via `@google/genai`
 - Vertex AI auth flow for Veo long-running video operations
 
+## Architecture
+
+High-level architecture and diagram: see [docs/architecture.md](docs/architecture.md).
+
+![High-level architecture diagram](docs/architecture.png)
+
 ## Prerequisites
 
 - Node.js 20+
@@ -84,9 +90,23 @@ pnpm dev
 
 Open http://localhost:3000
 
-## Reproducible Testing
+## Quick UI Repro (recommended)
 
-There is currently no dedicated unit/integration test runner in this repo. Use the reproducible smoke checks below.
+Follow these steps to reproduce the core demo in the UI (fastest path):
+
+1. Open the app at http://localhost:3000.
+2. Select a catalog song (e.g., 告白氣球 — "Love Confession") from Hit Singles.
+3. Keep the cache toggle ON (recommended for fast, demo-friendly runs).
+4. Click "Direct MV" to generate per-line visuals and hearsay lyrics.
+5. Wait for Studio output to appear, then switch to `Perform` mode.
+6. Press Play — lyrics will highlight in sync with the visuals.
+7. Use the Faithful ↔ Funny slider to change variants; tap Copy to share.
+
+Optional: paste lyrics or upload audio to test any-song flows.
+
+## Optional: Reproducible Testing (developer)
+
+There is currently no dedicated unit/integration test runner in this repo. The tests below are optional developer checks you can run to validate build and deterministic director behavior.
 
 ### 1) Baseline Build + Lint
 
