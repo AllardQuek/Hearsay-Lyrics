@@ -162,8 +162,21 @@ if (isDatasetMode && datasetItems && datasetRunName) {
       // Thin result trace — captures what happened for this fixture in this run.
       const trace = langfuse.trace({
         name: "dataset-eval-item",
-        input: { chinese: lineResult.chinese, pinyin: lineResult.pinyin },
-        output: { anyPass: lineResult.anyPass },
+        input: {
+          chinese: lineResult.chinese,
+          pinyin: lineResult.pinyin,
+          candidates: lineResult.candidates.map((c) => c.text),
+        },
+        output: {
+          anyPass: lineResult.anyPass,
+          candidates: lineResult.candidates.map((c) => ({
+            text: c.text,
+            pass: c.pass,
+            bannedPass: c.bannedCheck.pass,
+            phoneticScore: c.phoneticCheck?.score ?? null,
+            reason: c.phoneticCheck?.reason ?? null,
+          })),
+        },
         metadata: { runName: datasetRunName },
       });
 
