@@ -40,3 +40,6 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# evals — last-run capture is ephemeral, not committed
+evals/last-run.json

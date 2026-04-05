@@ -67,6 +67,7 @@ export default function Home() {
   const [outputMode, setOutputMode] = useState<"studio" | "perform">("studio");
   const [segmentOverrides, setSegmentOverrides] = useState<Record<string, SegmentMediaType>>({});
   const [videoClips, setVideoClips] = useState<Record<string, VideoClipAsset>>({});
+  const [generateMedia, setGenerateMedia] = useState(true);
   const [lineMediaStatuses, setLineMediaStatuses] = useState<Record<number, LineMediaStatus>>({});
   const [showStudioDiagnostics, setShowStudioDiagnostics] = useState(false);
   const abortControllerRef = useRef<AbortController | null>(null);
@@ -384,7 +385,7 @@ export default function Home() {
   );
 
   useEffect(() => {
-    if (directorPhase !== "complete" || mediaSegments.length === 0) return;
+    if (!generateMedia || directorPhase !== "complete" || mediaSegments.length === 0) return;
 
     for (const segment of mediaSegments) {
       if (segment.mediaType !== "video") continue;
@@ -396,7 +397,16 @@ export default function Home() {
       inFlightSegmentsRef.current.add(segment.id);
       void startSegmentVideoGeneration(segment, generationEpochRef.current);
     }
-  }, [directorPhase, mediaSegments, startSegmentVideoGeneration, videoClips]);
+  }, [generateMedia, directorPhase, mediaSegments, startSegmentVideoGeneration, videoClips]);
+
+  // Clear loading as soon as all text lines are received — images trickle in silently after.
+  // This decouples the CTA button state from image generation latency.
+  useEffect(() => {
+    if (!loading) return;
+    if (expectedTotalLines > 0 && directorLines.length >= expectedTotalLines) {
+      setLoading(false);
+    }
+  }, [loading, expectedTotalLines, directorLines.length]);
 
   useEffect(() => {
     if (directorPhase !== "complete" || hearsayResults.length === 0) return;
@@ -763,7 +773,7 @@ export default function Home() {
       const response = await fetch("/api/director", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ text, preComputed, songId, cacheMode, funnyWeight }),
+        body: JSON.stringify({ text, preComputed, songId, cacheMode, funnyWeight, generateImages: generateMedia }),
         signal: abortControllerRef.current.signal,
       });
 
@@ -776,6 +786,21 @@ export default function Home() {
       const reader = response.body.getReader();
       const decoder = new TextDecoder();
       let buffer = "";
+      // Local counters to detect when all lyric text has arrived — used to
+      // clear the loading state before image-update chunks finish streaming.
+      let streamTotalLines = 0;
+      let streamReceivedLines = 0;
+
+      const checkLyricsComplete = (data: Record<string, unknown>) => {
+        if (data.type === "meta" && typeof data.totalLines === "number") {
+          streamTotalLines = data.totalLines;
+        } else if (data.type === "line") {
+          streamReceivedLines++;
+          if (streamTotalLines > 0 && streamReceivedLines >= streamTotalLines) {
+            setLoading(false);
+          }
+        }
+      };
 
       while (true) {
         const { done, value } = await reader.read();
@@ -792,6 +817,7 @@ export default function Home() {
           if (!line.trim()) continue;
           try {
             const data = JSON.parse(line) as Record<string, unknown>;
+            checkLyricsComplete(data);
             handleDirectorRecord(data);
           } catch (e) {
             console.error("Chunk parse error:", e);
@@ -803,6 +829,7 @@ export default function Home() {
       if (buffer.trim()) {
         try {
           const data = JSON.parse(buffer) as Record<string, unknown>;
+          checkLyricsComplete(data);
           handleDirectorRecord(data);
         } catch (e) {
           console.error("Final chunk parse error:", e);
@@ -1057,9 +1084,11 @@ export default function Home() {
                 Edutainment across cultures — singability-first hearsay lyrics with synced AI visuals and video, enabling everyone to sing along across cultures.
               </p>
             </div>
-            <SongInput 
+            <SongInput
               onGenerate={startDirectorStream}
               loading={loading}
+              generateMedia={generateMedia}
+              onToggleMedia={setGenerateMedia}
             />
           </motion.div>
 

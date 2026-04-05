@@ -1,0 +1,152 @@
+[
+  {
+    "id": "lc-v4-sai-na-he-pan",
+    "chinese": "塞纳河畔",
+    "pinyin": "Sāi nà hé pàn",
+    "candidates": [
+      { "text": "Sinner her pan" }
+    ],
+    "expectedPass": true,
+    "notes": "From lc-v4 sample. 'Sinner' ~ Sāi nà, 'her' ~ hé, 'pan' ~ pàn. Good phonetic mapping."
+  },
+  {
+    "id": "lc-multi-v-far-down-may-gray",
+    "chinese": "花店玫瑰",
+    "pinyin": "Huā diàn méi guī",
+    "candidates": [
+      { "text": "Far down may gray" }
+    ],
+    "expectedPass": true,
+    "notes": "Appears in lc-v4 and love-confession-v2. All valid English. 'Far' ~ Huā, 'down' ~ diàn, 'may' ~ méi, 'gray' ~ guī."
+  },
+  {
+    "id": "lc-canonical-shorn-in-sway",
+    "chinese": "留下唇印的嘴",
+    "pinyin": "Liú xià chún yìn de zuǐ",
+    "candidates": [
+      { "text": "Lose ya shorn in the sway" }
+    ],
+    "expectedPass": true,
+    "notes": "The gold-standard example from HEARSAY_PROMPT itself. Appears in lc-v4 and love-confession-v2. 'sway' ~ zuǐ correctly avoids 'zway'."
+  },
+  {
+    "id": "lc-go-buy-cheat-chew",
+    "chinese": "告白气球",
+    "pinyin": "Gào bái qì qiú",
+    "candidates": [
+      { "text": "Go buy cheat chew" },
+      { "text": "Gow buy cheat you" }
+    ],
+    "expectedPass": true,
+    "notes": "Appears across multiple versions (v0, v1, v2). Consistent phonetic match, all real English words."
+  },
+  {
+    "id": "zddy-v1-walk-men",
+    "chinese": "我们的开始",
+    "pinyin": "wǒ men de kāi shǐ",
+    "candidates": [
+      { "text": "Walk men the guy she" }
+    ],
+    "expectedPass": true,
+    "notes": "From zui-chang-de-dian-ying-v1. 'Walk' ~ wǒ, 'men' ~ men, 'guy' ~ kāi, 'she' ~ shǐ. All valid English."
+  },
+  {
+    "id": "zddy-v1-man-man-want",
+    "chinese": "慢慢忘记你",
+    "pinyin": "màn màn wàng jì nǐ",
+    "candidates": [
+      { "text": "Man man want get knee" }
+    ],
+    "expectedPass": true,
+    "notes": "From zui-chang-de-dian-ying-v1. Solid phonetic match throughout. All real English."
+  },
+  {
+    "id": "lc-v4-banned-shuo-nan",
+    "chinese": "你说你有点难追",
+    "pinyin": "Nǐ shuō nǐ yǒudiǎn nán zhuī",
+    "candidates": [
+      { "text": "Nee shuo nee yo then nan jury" }
+    ],
+    "expectedPass": false,
+    "notes": "From lc-v4. Two banned patterns: 'shuo' (original pinyin) and 'nan' (pinyin sound). Classic violation where the reviewer step failed."
+  },
+  {
+    "id": "lc-v1-banned-tiao-zway",
+    "chinese": "礼物不需挑最贵",
+    "pinyin": "Lǐwù bù xū tiāo zuì guì",
+    "candidates": [
+      { "text": "Lee woo boo shoe tiao sway gray" }
+    ],
+    "expectedPass": false,
+    "notes": "From lc-v4 and love-confession-v1. Two banned patterns: 'tiao' and 'zway'. Common co-occurrence violation."
+  },
+  {
+    "id": "lc-v1-banned-zway-in-good-line",
+    "chinese": "留下唇印的嘴",
+    "pinyin": "Liú xià chún yìn de zuǐ",
+    "candidates": [
+      { "text": "Lose ya shorn in the zway, ooh-ooh" }
+    ],
+    "expectedPass": false,
+    "notes": "From love-confession-v1. Same line as the gold-standard but with 'zway' instead of 'sway'. Shows even a near-correct output can slip in a banned pattern."
+  },
+  {
+    "id": "lc-v2-banned-jui",
+    "chinese": "你说你有点难追",
+    "pinyin": "Nǐ shuō nǐ yǒudiǎn nán zhuī",
+    "candidates": [
+      { "text": "Knee shore knee yo dent nun jui" }
+    ],
+    "expectedPass": false,
+    "notes": "From love-confession-v2. 'jui' is a banned pinyin sound (attempted rendering of 'zhuī')."
+  },
+  {
+    "id": "lc-v2-banned-ing-zao",
+    "chinese": "营造浪漫的约会",
+    "pinyin": "Yíngzào làngmàn de yuēhuì",
+    "candidates": [
+      { "text": "Ing zao long mon the you wait" }
+    ],
+    "expectedPass": false,
+    "notes": "From love-confession-v2. 'Ing' starts the line (standalone banned), 'zao' also banned. Model tried to render 'Yíng' as 'Ing' and 'zào' as 'zao'."
+  },
+  {
+    "id": "lc-v1-banned-wha-dang",
+    "chinese": "花店玫瑰",
+    "pinyin": "Huā diàn méi guī",
+    "candidates": [
+      { "text": "Wha dang may gway" }
+    ],
+    "expectedPass": false,
+    "notes": "From love-confession-v1. 'wha' is a banned pseudo-English sound. 'dang' is also banned (though it is informal English — it's on the list as a common pinyin-leakage word)."
+  },
+  {
+    "id": "lc-v1-banned-jee",
+    "chinese": "只要香榭的落叶",
+    "pinyin": "Zhǐyào xiāng xiè de luòyè",
+    "candidates": [
+      { "text": "Jee-yow shong sheh duh law-yeh" }
+    ],
+    "expectedPass": false,
+    "notes": "From love-confession-v1. 'Jee' matches the banned pattern 'jee' (case-insensitive, not followed by a letter). Rest of the line is pseudo-English gibberish but 'Jee' is the detectable violation."
+  },
+  {
+    "id": "zddy-v0-pseudo-english",
+    "chinese": "放映了三年",
+    "pinyin": "fàng yìng le sān nián",
+    "candidates": [
+      { "text": "Fangying left san neon" }
+    ],
+    "notes": "From zui-chang-de-dian-ying-v0. 'Fangying' is a made-up compound — not in BANNED_PATTERNS so banned check will pass. Known limitation: only LLM-as-judge can catch novel pseudo-English words like this. Included as an exploratory case (no expectedPass)."
+  },
+  {
+    "id": "zddy-v0-raw-pinyin-mix",
+    "chinese": "脑海中还在旋转",
+    "pinyin": "nǎo hǎi zhōng hái zài xuán zhuǎn",
+    "candidates": [
+      { "text": "Now hi jung high zai shuan juan" }
+    ],
+    "notes": "From zui-chang-de-dian-ying-v0. No banned patterns triggered (none of 'jung', 'zai', 'shuan', 'juan' are in BANNED_PATTERNS). But phonetically it is a raw pinyin transliteration, not real English. Exploratory case to test LLM-as-judge sensitivity.",
+    "expectedPass": false
+  }
+]

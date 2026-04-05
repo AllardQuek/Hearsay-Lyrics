@@ -3,6 +3,7 @@ import { promises as fs } from "node:fs";
 import path from "node:path";
 import { genAI, modelLite, DIRECTOR_PROMPT, safeGenerateContent } from "@/lib/gemini";
 import { getLineLevelPinyin } from "@/lib/pinyin";
+import { captureLastRun } from "@/lib/eval-capture";
 import {
   type CachedVideoClip,
   exportAssetsForCache,
@@ -195,6 +196,8 @@ export async function POST(req: Request) {
     if (cacheableSongId && effectiveCacheMode === "prefer-cache") {
       const cachedAssets = await loadCachedAssetsFromCache(cacheableSongId);
       if (cachedAssets && cachedAssets.directorLines.length > 0) {
+        console.log("[director] cache hit, calling captureLastRun with", cachedAssets.directorLines.length, "lines");
+        captureLastRun(cachedAssets.directorLines);
         return new Response(streamCachedAssets(cachedAssets), {
           headers: {
             "Content-Type": "application/x-ndjson",
@@ -272,6 +275,10 @@ Return valid JSON array of director outputs.
               );
             }
           }
+
+          // Capture text-only output for eval runs before images are attached.
+          console.log("[director] live generation complete, calling captureLastRun with", generatedLines.length, "lines");
+          captureLastRun(generatedLines);
 
           // Step 2: Generate images after line streaming so users can read all lyrics quickly.
           if (generateImages && pendingImageLines.length > 0) {

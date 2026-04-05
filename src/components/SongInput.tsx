@@ -26,12 +26,16 @@ const LOADING_STAGES = [
   "Assembling final cut...",
 ];
 
-export default function SongInput({ 
-  onGenerate, 
-  loading 
-}: { 
+export default function SongInput({
+  onGenerate,
+  loading,
+  generateMedia,
+  onToggleMedia,
+}: {
   onGenerate: (text: string, audioUrl?: string, preComputed?: SyncLine[], songId?: string, cacheMode?: CacheMode, funnyWeight?: number) => void,
   loading: boolean
+  generateMedia: boolean
+  onToggleMedia: (v: boolean) => void
 }) {
   const [pastedText, setPastedText] = useState("");
   const [audioUrl, setAudioUrl] = useState("");
@@ -519,6 +523,27 @@ export default function SongInput({
               )}
             </div>
           </button>
+        </div>
+
+        <div className="flex items-center justify-center gap-2 mt-3">
+          <button
+            type="button"
+            role="switch"
+            aria-checked={generateMedia}
+            onClick={() => onToggleMedia(!generateMedia)}
+            className={cn(
+              "relative inline-flex h-4 w-7 shrink-0 cursor-pointer rounded-full border border-white/10 transition-colors duration-200",
+              generateMedia ? "bg-primary/60" : "bg-white/10"
+            )}
+          >
+            <span className={cn(
+              "pointer-events-none inline-block h-3 w-3 rounded-full bg-white shadow transition-transform duration-200 mt-[0.5px]",
+              generateMedia ? "translate-x-3" : "translate-x-0.5"
+            )} />
+          </button>
+          <span className="text-[10px] uppercase tracking-[0.2em] text-white/30 font-medium select-none">
+            Generate media
+          </span>
         </div>
 
         {!pastedText.trim() && !loading && (

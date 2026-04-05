@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { modelLite, HEARSAY_PROMPT, safeGenerateContent } from "@/lib/gemini";
 import { getLineLevelPinyin } from "@/lib/pinyin";
 import { PHONETIC_ANCHORS, BANNED_PATTERNS } from "@/lib/phonetic-anchors";
+import { captureLastRun } from "@/lib/eval-capture";
 
 export async function POST(req: Request) {
   try {
@@ -25,6 +26,7 @@ export async function POST(req: Request) {
           // Process chunks SEQUENTIALLY to stay within 15 RPM limit.
           // Each chunk makes 2 serial calls (generate + review), so peak concurrent Gemini
           // calls is always 1 — well within the rate limit.
+          const capturedLines: unknown[] = [];
           for (let index = 0; index < lineChunks.length; index++) {
             const chunk = lineChunks[index];
 
@@ -74,10 +76,14 @@ Return the FIXED JSON array only.
               throw new Error(`Failed to find JSON for chunk ${index}`);
             }
             const hearsayLines = JSON.parse(jsonMatch[0]);
+            capturedLines.push(...hearsayLines);
 
             // Stream each chunk to the client as soon as it's ready
             controller.enqueue(encoder.encode(JSON.stringify(hearsayLines) + "\n"));
           }
+
+          // Fire-and-forget: capture final output for eval runs
+          captureLastRun(capturedLines);
         } catch (error) {
           console.error("Stream Error:", error);
           controller.error(error);
