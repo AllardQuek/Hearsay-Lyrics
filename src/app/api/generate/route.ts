@@ -3,6 +3,7 @@ import { modelLite, HEARSAY_PROMPT, safeGenerateContent } from "@/lib/gemini";
 import { getLineLevelPinyin } from "@/lib/pinyin";
 import { PHONETIC_ANCHORS, BANNED_PATTERNS } from "@/lib/phonetic-anchors";
 import { captureLastRun } from "@/lib/eval-capture";
+import { getLangfuse } from "@/lib/langfuse";
 
 export async function POST(req: Request) {
   try {
@@ -19,6 +20,13 @@ export async function POST(req: Request) {
       lineChunks.push(allLines.slice(i, i + chunkSize));
     }
 
+    // Fetch versioned prompt from Langfuse; falls back to hardcoded if unreachable.
+    const hearsayPromptClient = await getLangfuse().getPrompt("hearsay-generation", undefined, {
+      fallback: HEARSAY_PROMPT,
+      cacheTtlSeconds: 300,
+    });
+    const hearsayPromptText = hearsayPromptClient.prompt;
+
     const encoder = new TextEncoder();
     const stream = new ReadableStream({
       async start(controller) {
@@ -32,7 +40,7 @@ export async function POST(req: Request) {
 
             // Step 1: Creative Generation
             const generationPrompt = `
-${HEARSAY_PROMPT}
+${hearsayPromptText}
 
 Target Humor Weight: ${funnyWeight} (0-1)
 Process these specific lines:

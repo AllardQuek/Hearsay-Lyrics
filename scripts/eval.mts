@@ -2,14 +2,16 @@
  * Hearsay Lyric Eval CLI
  *
  * Usage:
- *   pnpm eval                        # runs evals/fixtures.json
- *   pnpm eval evals/last-run.json    # runs last captured UI output
- *   pnpm eval path/to/any.json       # runs any compatible fixture file
+ *   pnpm eval                            # runs evals/fixtures.json
+ *   pnpm eval evals/last-run.json        # runs last captured UI output
+ *   pnpm eval path/to/any.json           # runs any compatible fixture file
+ *   pnpm eval --dataset <run-name>       # runs Langfuse "hearsay-fixtures" dataset, records a named run
  */
 
 import * as fs from "fs";
 import * as path from "path";
 import { runEvals, type EvalFixture } from "../src/lib/evaluators";
+import { getLangfuse } from "../src/lib/langfuse";
 
 // ANSI colors
 const c = {
@@ -28,22 +30,60 @@ function dim(s: string) { return `${c.dim}${s}${c.reset}`; }
 function bold(s: string) { return `${c.bold}${s}${c.reset}`; }
 function cyan(s: string) { return `${c.cyan}${s}${c.reset}`; }
 
-const fixturePath = process.argv[2]
-  ?? path.join(process.cwd(), "evals", "fixtures.json");
+// --- Resolve fixtures and source label ---
 
-const resolvedPath = path.resolve(fixturePath);
-if (!fs.existsSync(resolvedPath)) {
-  console.error(fail(`✗ File not found: ${resolvedPath}`));
+const isDatasetMode = process.argv[2] === "--dataset";
+const datasetRunName = isDatasetMode ? process.argv[3] : undefined;
+
+if (isDatasetMode && !datasetRunName) {
+  console.error(fail("✗ Missing run name. Usage: pnpm eval --dataset <run-name>"));
   process.exit(1);
 }
 
-const fixtures: EvalFixture[] = JSON.parse(fs.readFileSync(resolvedPath, "utf-8"));
-const source = path.relative(process.cwd(), resolvedPath);
+let fixtures: EvalFixture[];
+let source: string;
 
-console.log(`\n${bold("Hearsay Eval")}  ${dim(source)}`);
+// Dataset items kept in scope for linking after eval (dataset mode only).
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+let datasetItems: any[] | null = null;
+
+if (isDatasetMode) {
+  const dataset = await getLangfuse().getDataset("hearsay-fixtures");
+  datasetItems = dataset.items;
+  fixtures = dataset.items.map((item) => ({
+    id: item.metadata?.id as string | undefined,
+    chinese: (item.input as Record<string, unknown>).chinese as string,
+    pinyin: (item.input as Record<string, unknown>).pinyin as string,
+    candidates: (item.input as Record<string, unknown>).candidates as EvalFixture["candidates"],
+    expectedPass: (item.expectedOutput as Record<string, unknown> | null)?.pass as boolean | undefined,
+    notes: item.metadata?.notes as string | undefined,
+    meaning: item.metadata?.meaning as string | undefined,
+  }));
+  source = `langfuse:hearsay-fixtures`;
+} else {
+  const fixturePath = process.argv[2]
+    ?? path.join(process.cwd(), "evals", "fixtures.json");
+  const resolvedPath = path.resolve(fixturePath);
+  if (!fs.existsSync(resolvedPath)) {
+    console.error(fail(`✗ File not found: ${resolvedPath}`));
+    process.exit(1);
+  }
+  fixtures = JSON.parse(fs.readFileSync(resolvedPath, "utf-8"));
+  source = path.relative(process.cwd(), resolvedPath);
+}
+
+// --- Run ---
+
+const modeLabel = isDatasetMode
+  ? `${bold("Hearsay Eval")}  ${dim(`langfuse:hearsay-fixtures`)}  ${dim(`run: ${datasetRunName}`)}`
+  : `${bold("Hearsay Eval")}  ${dim(source)}`;
+
+console.log(`\n${modeLabel}`);
 console.log(dim(`${fixtures.length} lines · ${fixtures.reduce((n, f) => n + f.candidates.length, 0)} candidates\n`));
 
 const report = await runEvals(fixtures, source);
+
+// --- Print results ---
 
 for (const line of report.results) {
   const label = line.id ? dim(`[${line.id}]`) : "";
@@ -105,6 +145,46 @@ if (report.suggestedBannedPatterns.length > 0) {
   report.suggestedBannedPatterns.forEach((w) => console.log(`  ${fail("→")} '${w}'`));
   console.log();
 }
+
+// --- Dataset run linking (dataset mode only) ---
+// Create a thin per-item trace for each fixture, log its scores, and link to the dataset item.
+// This is what Langfuse uses to build the experiment comparison table across runs.
+if (isDatasetMode && datasetItems && datasetRunName) {
+  process.stdout.write(dim(`Linking ${report.results.length} items to dataset run "${datasetRunName}"... `));
+
+  const langfuse = getLangfuse();
+  await Promise.all(
+    datasetItems.map(async (datasetItem) => {
+      const itemId = datasetItem.metadata?.id as string | undefined;
+      const lineResult = report.results.find((r) => r.id === itemId);
+      if (!lineResult) return;
+
+      // Thin result trace — captures what happened for this fixture in this run.
+      const trace = langfuse.trace({
+        name: "dataset-eval-item",
+        input: { chinese: lineResult.chinese, pinyin: lineResult.pinyin },
+        output: { anyPass: lineResult.anyPass },
+        metadata: { runName: datasetRunName },
+      });
+
+      // Log per-candidate scores so the Langfuse UI can display them per item.
+      for (const candidate of lineResult.candidates) {
+        if (candidate.phoneticCheck) {
+          trace.score({ name: "phonetic-score", value: candidate.phoneticCheck.score });
+        }
+        trace.score({ name: "pass", value: candidate.pass ? 1 : 0 });
+      }
+
+      await datasetItem.link(trace, datasetRunName);
+    })
+  );
+
+  console.log(pass("done"));
+  console.log(dim(`  View run at ${process.env.LANGFUSE_BASE_URL ?? "https://cloud.langfuse.com"}/datasets/hearsay-fixtures/runs/${datasetRunName}\n`));
+}
+
+// Flush all Langfuse events before the process exits (short-lived Node process won't auto-flush).
+await getLangfuse().flushAsync();
 
 // Exit with non-zero if any expected mismatches (useful for CI)
 if (report.expectedMismatches > 0) process.exit(1);

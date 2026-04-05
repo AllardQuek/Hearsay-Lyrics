@@ -1,5 +1,9 @@
 import { BANNED_PATTERNS, PHONETIC_ANCHORS } from "./phonetic-anchors";
 import { safeGenerateContent, modelLite } from "./gemini";
+import { getLangfuse } from "./langfuse";
+import type Langfuse from "langfuse";
+
+type TraceClient = ReturnType<Langfuse["trace"]>;
 
 /**
  * Minimum phonetic score for a hearsay line to be considered passing.
@@ -8,6 +12,49 @@ import { safeGenerateContent, modelLite } from "./gemini";
  * not strict phoneme-for-phoneme accuracy. Set accordingly.
  */
 export const PHONETIC_PASS_THRESHOLD = 0.5;
+
+/**
+ * Phonetic judge prompt template. Uses {{anchors_block}} and {{input}} as
+ * Langfuse template variables. Kept here as the fallback if Langfuse is
+ * unreachable — must stay in sync with the "phonetic-judge" prompt in Langfuse.
+ */
+export const PHONETIC_JUDGE_TEMPLATE = `You are evaluating "Hearsay Lyrics" for a C-Pop karaoke app.
+
+WHAT HEARSAY LYRICS ARE:
+Hearsay lyrics are English phrases chosen to SOUND like Mandarin when sung aloud —
+like how a non-Chinese speaker might mishear a song. The goal is aural approximation,
+not a translation. Semantic meaning of the English line is IRRELEVANT — a nonsensical
+English phrase that sounds like the Mandarin is better than a meaningful one that doesn't.
+Slang, contractions, informal speech, and rare-but-real English words are all valid and
+do NOT lower the score.
+
+CRITICAL RULE — REAL ENGLISH WORDS ONLY:
+Every word must be a genuine English dictionary word or recognised English slang.
+Raw romanisation / transliteration of Mandarin is a hard failure even if it sounds accurate,
+because the whole point is to find REAL English words that coincidentally approximate the sounds.
+Examples of violations: "zai", "shuan", "juan" (used as sounds, not the name), "fangying", "jee", "wha".
+If you spot such words, list them in "flaggedWords" AND reduce the score accordingly —
+a line with even one non-English word should not score above 0.4.
+
+PHONETIC MAPPING EXAMPLES (what good hearsay looks like for common Mandarin sounds):
+{{anchors_block}}
+
+SCORING GUIDE (aural impression when sung, not academic phonetics):
+- High  = All words are real English AND most syllables map naturally when sung aloud
+- Mid   = All words are real English, some syllables connect clearly, others are loose approximations
+- Low   = Real English words but weak phonetic connection; or one borderline non-English word
+- Fail  = Non-English / raw pinyin words present, OR no meaningful phonetic relationship
+
+For each entry, return:
+- "score": 0.0–1.0 per the guide above
+- "reason": one sentence
+- "flaggedWords": array of specific words that appear to be non-English or raw pinyin (empty array if none)
+
+Input:
+{{input}}
+
+Return ONLY a valid JSON array with one object per entry, preserving the "i" index:
+[{"i": 0, "score": 0.87, "reason": "...", "flaggedWords": []}, ...]`;
 
 export interface EvalResult {
   pass: boolean;
@@ -84,10 +131,12 @@ export function checkBannedPatterns(text: string): EvalResult {
 
 /**
  * LLM-as-judge — scores how well each English hearsay phonetically matches its Mandarin pinyin.
- * Batches all lines into a single Gemini call to minimise API usage and stay well under rate limits.
+ * Batches all lines into a single Gemini call to minimise API usage and stay well within rate limits.
+ * Fetches the judge prompt from Langfuse (versioned); falls back to PHONETIC_JUDGE_TEMPLATE if unreachable.
  */
 export async function evaluatePhoneticMatchBatch(
-  lines: Array<{ hearsay: string; pinyin: string }>
+  lines: Array<{ hearsay: string; pinyin: string }>,
+  trace?: TraceClient
 ): Promise<EvalResult[]> {
   if (lines.length === 0) return [];
 
@@ -100,47 +149,32 @@ export async function evaluatePhoneticMatchBatch(
     .map(([pinyin, words]) => `  "${pinyin}" → ${words.slice(0, 3).join(", ")}`)
     .join("\n");
 
-  const prompt = `You are evaluating "Hearsay Lyrics" for a C-Pop karaoke app.
+  // Fetch the versioned judge prompt from Langfuse; fall back to the local template.
+  const langfuse = getLangfuse();
+  const promptClient = await langfuse.getPrompt("phonetic-judge", undefined, {
+    fallback: PHONETIC_JUDGE_TEMPLATE,
+    cacheTtlSeconds: 300,
+  });
+  const prompt = promptClient.compile({
+    anchors_block: anchorExamples,
+    input: JSON.stringify(numbered, null, 2),
+  });
 
-WHAT HEARSAY LYRICS ARE:
-Hearsay lyrics are English phrases chosen to SOUND like Mandarin when sung aloud —
-like how a non-Chinese speaker might mishear a song. The goal is aural approximation,
-not a translation. Semantic meaning of the English line is IRRELEVANT — a nonsensical
-English phrase that sounds like the Mandarin is better than a meaningful one that doesn't.
-Slang, contractions, informal speech, and rare-but-real English words are all valid and
-do NOT lower the score.
-
-CRITICAL RULE — REAL ENGLISH WORDS ONLY:
-Every word must be a genuine English dictionary word or recognised English slang.
-Raw romanisation / transliteration of Mandarin is a hard failure even if it sounds accurate,
-because the whole point is to find REAL English words that coincidentally approximate the sounds.
-Examples of violations: "zai", "shuan", "juan" (used as sounds, not the name), "fangying", "jee", "wha".
-If you spot such words, list them in "flaggedWords" AND reduce the score accordingly —
-a line with even one non-English word should not score above 0.4.
-
-PHONETIC MAPPING EXAMPLES (what good hearsay looks like for common Mandarin sounds):
-${anchorExamples}
-
-SCORING GUIDE (aural impression when sung, not academic phonetics):
-- High  = All words are real English AND most syllables map naturally when sung aloud
-- Mid   = All words are real English, some syllables connect clearly, others are loose approximations
-- Low   = Real English words but weak phonetic connection; or one borderline non-English word
-- Fail  = Non-English / raw pinyin words present, OR no meaningful phonetic relationship
-
-For each entry, return:
-- "score": 0.0–1.0 per the guide above
-- "reason": one sentence
-- "flaggedWords": array of specific words that appear to be non-English or raw pinyin (empty array if none)
-
-Input:
-${JSON.stringify(numbered, null, 2)}
-
-Return ONLY a valid JSON array with one object per entry, preserving the "i" index:
-[{"i": 0, "score": 0.87, "reason": "...", "flaggedWords": []}, ...]`;
+  // Log the Gemini call as a generation span on the parent trace (if provided).
+  const generation = trace?.generation({
+    name: "phonetic-batch-judge",
+    model: modelLite,
+    input: prompt,
+    promptName: promptClient.name,
+    promptVersion: promptClient.version,
+  });
 
   try {
     const result = await safeGenerateContent(modelLite, prompt);
     const text = result.response.text().trim();
+
+    generation?.end({ output: text });
+
     const jsonMatch = text.match(/\[[\s\S]*\]/);
     if (!jsonMatch) throw new Error("no JSON array in response");
 
@@ -155,6 +189,7 @@ Return ONLY a valid JSON array with one object per entry, preserving the "i" ind
       return { pass: score >= PHONETIC_PASS_THRESHOLD, score, reason: entry.reason ?? "", flaggedWords };
     });
   } catch (err) {
+    generation?.end({ output: String(err), level: "ERROR" });
     const reason = `eval error: ${err instanceof Error ? err.message : String(err)}`;
     return lines.map(() => ({ pass: false, score: 0, reason }));
   }
@@ -164,11 +199,17 @@ Return ONLY a valid JSON array with one object per entry, preserving the "i" ind
  * Run all evaluators over a list of fixtures/HearsayLines.
  * Banned check runs synchronously per candidate.
  * Phonetic eval batches all clean candidates into a single Gemini call.
+ * Each run is logged as a Langfuse trace with per-candidate scores.
  */
 export async function runEvals(
   fixtures: EvalFixture[],
   source = "unknown"
 ): Promise<EvalReport> {
+  const trace = getLangfuse().trace({
+    name: "eval-run",
+    input: { source, totalLines: fixtures.length },
+  });
+
   // Step 1: run banned checks synchronously (free, instant)
   type Pending = { fixtureIdx: number; candidateIdx: number; hearsay: string; pinyin: string };
   const bannedResults: EvalResult[][] = fixtures.map((fixture) =>
@@ -187,7 +228,8 @@ export async function runEvals(
 
   // Step 3: one batch phonetic call for all clean candidates
   const phoneticResults = await evaluatePhoneticMatchBatch(
-    pending.map((p) => ({ hearsay: p.hearsay, pinyin: p.pinyin }))
+    pending.map((p) => ({ hearsay: p.hearsay, pinyin: p.pinyin })),
+    trace
   );
 
   // Step 4: assemble results
@@ -248,6 +290,27 @@ export async function runEvals(
 
   const passingLines = results.filter((r) => r.anyPass).length;
   const avgPhoneticScore = phoneticScoreCount > 0 ? phoneticScoreSum / phoneticScoreCount : 0;
+
+  // Log summary + per-candidate scores to Langfuse.
+  trace.update({
+    output: { passingLines, totalLines: fixtures.length, bannedViolations, avgPhoneticScore, expectedMismatches },
+  });
+  trace.score({ name: "pass-rate", value: passingLines / fixtures.length });
+  trace.score({ name: "avg-phonetic-score", value: avgPhoneticScore });
+  if (expectedMismatches > 0) {
+    trace.score({ name: "expected-mismatches", value: expectedMismatches });
+  }
+  results.forEach((lineResult) => {
+    lineResult.candidates.forEach((candidate) => {
+      if (candidate.phoneticCheck) {
+        trace.score({
+          name: "phonetic-score",
+          value: candidate.phoneticCheck.score,
+          comment: `${lineResult.id ?? lineResult.chinese}: "${candidate.text}"`,
+        });
+      }
+    });
+  });
 
   return {
     source,

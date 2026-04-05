@@ -4,6 +4,7 @@ import path from "node:path";
 import { genAI, modelLite, DIRECTOR_PROMPT, safeGenerateContent } from "@/lib/gemini";
 import { getLineLevelPinyin } from "@/lib/pinyin";
 import { captureLastRun } from "@/lib/eval-capture";
+import { getLangfuse } from "@/lib/langfuse";
 import {
   type CachedVideoClip,
   exportAssetsForCache,
@@ -217,6 +218,12 @@ export async function POST(req: Request) {
     }
 
     const encoder = new TextEncoder();
+    // Fetch versioned prompt from Langfuse; falls back to hardcoded if unreachable.
+    const directorPromptClient = await getLangfuse().getPrompt("director-generation", undefined, {
+      fallback: DIRECTOR_PROMPT,
+      cacheTtlSeconds: 300,
+    });
+    const directorPromptText = directorPromptClient.prompt;
     const generatedLines: DirectorLine[] = [];
     const pendingImageLines: Array<{ line: DirectorLine; lineIndex: number }> = [];
     const stream = new ReadableStream({
@@ -237,7 +244,7 @@ export async function POST(req: Request) {
 
             // Step 1: Generate hearsay + visual concepts
             const directorPrompt = `
-${DIRECTOR_PROMPT}
+${directorPromptText}
 
 Humor/Fun Weight: ${funnyWeight} (0=faithful, 1=hilarious)
 
