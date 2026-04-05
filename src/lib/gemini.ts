@@ -88,7 +88,11 @@ Output Structure (JSON Array ONLY):
   }
 ]
 
-Return ONLY a valid JSON array.
+Target Humor Weight: {{funny_weight}} (0-1)
+Process these specific lines:
+{{lines}}
+
+Return valid JSON array of HearsayLine objects.
 `;
 
 export const REFINE_PROMPT = `
@@ -169,5 +173,10 @@ RULES:
 3. VISUAL must literally depict what the hearsay says
 4. Be creative, funny, and memorable
 
-Return ONLY valid JSON array.
+Humor/Fun Weight: {{funny_weight}} (0=faithful, 1=hilarious)
+
+Process these lines:
+{{lines}}
+
+Return valid JSON array of director outputs.
 `;

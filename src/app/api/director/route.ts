@@ -223,7 +223,6 @@ export async function POST(req: Request) {
       fallback: DIRECTOR_PROMPT,
       cacheTtlSeconds: 300,
     });
-    const directorPromptText = directorPromptClient.prompt;
     const generatedLines: DirectorLine[] = [];
     const pendingImageLines: Array<{ line: DirectorLine; lineIndex: number }> = [];
     const stream = new ReadableStream({
@@ -243,16 +242,10 @@ export async function POST(req: Request) {
             const chunkStartIndex = chunkIndex * chunkSize;
 
             // Step 1: Generate hearsay + visual concepts
-            const directorPrompt = `
-${directorPromptText}
-
-Humor/Fun Weight: ${funnyWeight} (0=faithful, 1=hilarious)
-
-Process these lines:
-${JSON.stringify(chunk)}
-
-Return valid JSON array of director outputs.
-`;
+            const directorPrompt = directorPromptClient.compile({
+              funny_weight: String(funnyWeight),
+              lines: JSON.stringify(chunk),
+            });
             const genResult = await safeGenerateContent(modelLite, directorPrompt);
             const responseText = genResult.response.text();
 

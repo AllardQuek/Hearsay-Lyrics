@@ -25,8 +25,6 @@ export async function POST(req: Request) {
       fallback: HEARSAY_PROMPT,
       cacheTtlSeconds: 300,
     });
-    const hearsayPromptText = hearsayPromptClient.prompt;
-
     const encoder = new TextEncoder();
     const stream = new ReadableStream({
       async start(controller) {
@@ -39,15 +37,10 @@ export async function POST(req: Request) {
             const chunk = lineChunks[index];
 
             // Step 1: Creative Generation
-            const generationPrompt = `
-${hearsayPromptText}
-
-Target Humor Weight: ${funnyWeight} (0-1)
-Process these specific lines:
-${JSON.stringify(chunk)}
-
-Return valid JSON array of HearsayLine objects.
-`;
+            const generationPrompt = hearsayPromptClient.compile({
+              funny_weight: String(funnyWeight),
+              lines: JSON.stringify(chunk),
+            });
             const genResult = await safeGenerateContent(modelLite, generationPrompt);
             const initialHearsay = genResult.response.text();
 
